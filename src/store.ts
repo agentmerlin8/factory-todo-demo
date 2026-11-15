@@ -59,3 +59,22 @@ export function saveFilter(filter: Filter): void {
 export function newId(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
+
+/**
+ * TOD-1 — add a task. Trims the title; empty/whitespace-only titles are
+ * rejected (returns null, store untouched, no notification). Persistence
+ * and notification go through the same seam every later story extends.
+ * Returns the created task so callers can update their view immediately.
+ */
+export function addTask(title: string): Task | null {
+  const trimmed = title.trim();
+  if (!trimmed) return null;
+  const task: Task = {
+    id: newId(),
+    title: trimmed,
+    completed: false,
+    createdAt: Date.now(),
+  };
+  saveTasks([...loadTasks(), task]);
+  return task;
+}
