@@ -30,12 +30,41 @@ function emit(): void {
   for (const fn of listeners) fn();
 }
 
+/**
+ * Runtime guard for one stored entry. Storage is an UNTRUSTED boundary: the
+ * JSON may be written by an older version, another tab, or a user with
+ * devtools. `Array.isArray` alone lets `[null]` or `[{}]` reach the render
+ * and throw during mount, so every field is validated here, once.
+ */
+export function isTask(value: unknown): value is Task {
+  if (typeof value !== "object" || value === null) return false;
+  const t = value as Record<string, unknown>;
+  return (
+    typeof t.id === "string" &&
+    t.id.length > 0 &&
+    typeof t.title === "string" &&
+    typeof t.completed === "boolean" &&
+    typeof t.createdAt === "number" &&
+    Number.isFinite(t.createdAt)
+  );
+}
+
 export function loadTasks(): Task[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? (parsed as Task[]) : [];
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    // Drop malformed entries instead of crashing the mount. Dedupe by id so a
+    // corrupt store cannot produce duplicate React keys.
+    const seen = new Set<string>();
+    const tasks: Task[] = [];
+    for (const entry of parsed) {
+      if (!isTask(entry) || seen.has(entry.id)) continue;
+      seen.add(entry.id);
+      tasks.push(entry);
+    }
+    return tasks;
   } catch {
     return [];
   }
@@ -44,6 +73,32 @@ export function loadTasks(): Task[] {
 export function saveTasks(tasks: Task[]): void {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));
   emit();
+}
+
+/**
+ * Append records with the read and the write in ONE synchronous step.
+ *
+ * A caller that reads, does work, then writes always has a window where
+ * another tab can commit; merging BEFORE the write does not close it (the
+ * window is between the merge-read and setItem). Here the current state is
+ * read immediately before setItem with nothing in between, so a concurrent
+ * commit is either already visible (and preserved) or lands after ours.
+ *
+ * localStorage has no compare-and-swap, so this narrows the window to the
+ * minimum the platform allows rather than eliminating it. Cross-tab
+ * atomicity would need the Web Locks API; that is a deliberate follow-up,
+ * not something this function claims to provide.
+ */
+export function appendTasks(incoming: Task[]): Task[] {
+  const current = loadTasks();
+  const byId = new Map(current.map((t) => [t.id, t]));
+  for (const t of incoming) {
+    if (!byId.has(t.id)) byId.set(t.id, t);
+  }
+  const merged = [...byId.values()];
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+  emit();
+  return merged;
 }
 
 export function loadFilter(): Filter {
@@ -58,4 +113,35 @@ export function saveFilter(filter: Filter): void {
 
 export function newId(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/**
+ * TOD-1 — add a task. Trims the title; empty/whitespace-only titles are
+ * rejected (returns null, store untouched, no notification). Persistence
+ * and notification go through the same seam every later story extends.
+ * Returns the created task so callers can update their view immediately.
+ */
+/**
+ * Append a task without clobbering a concurrent writer.
+ *
+ * localStorage has no compare-and-swap, so a plain read-modify-write loses
+ * updates when two tabs interleave (both read the same list, both write, the
+ * second erases the first). We cannot make the pair atomic, but we can make
+ * the WRITE a merge: re-read immediately before persisting and union by id.
+ * That narrows the window to a single synchronous read+write and, crucially,
+ * never drops a record another tab already committed.
+ */
+export function addTask(title: string): Task | null {
+  const trimmed = title.trim();
+  if (!trimmed) return null;
+  const task: Task = {
+    id: newId(),
+    title: trimmed,
+    completed: false,
+    createdAt: Date.now(),
+  };
+  // Single synchronous read+merge+write; see appendTasks for the guarantee
+  // and its limit.
+  appendTasks([task]);
+  return task;
 }

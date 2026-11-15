@@ -1,5 +1,15 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { loadTasks, saveTasks, loadFilter, saveFilter, newId } from "./store";
+import {
+  addTask,
+  appendTasks,
+  isTask,
+  loadTasks,
+  saveTasks,
+  loadFilter,
+  saveFilter,
+  newId,
+  subscribe,
+} from "./store";
 
 beforeEach(() => {
   localStorage.clear();
@@ -40,5 +50,214 @@ describe("store persistence seam", () => {
   it("newId produces unique ids", () => {
     const ids = new Set(Array.from({ length: 50 }, () => newId()));
     expect(ids.size).toBe(50);
+  });
+});
+
+describe("addTask (TOD-1)", () => {
+  it("appends a task and persists it", () => {
+    const first = addTask("Water the plants");
+    const second = addTask("Read one chapter");
+
+    const tasks = loadTasks();
+    expect(tasks).toHaveLength(2);
+    expect(tasks[0]).toEqual(first);
+    expect(tasks[1]).toEqual(second);
+    expect(tasks.map((t) => t.title)).toEqual([
+      "Water the plants",
+      "Read one chapter",
+    ]);
+  });
+
+  it("creates well-formed tasks: unique id, trimmed title, not completed, timestamp", () => {
+    const before = Date.now();
+    const a = addTask("  Stretch for five minutes  ");
+    const b = addTask("Journal");
+    const after = Date.now();
+    if (!a || !b) throw new Error("addTask rejected a valid title");
+
+    expect(a.title).toBe("Stretch for five minutes");
+    expect(a.completed).toBe(false);
+    expect(typeof a.id).toBe("string");
+    expect(a.id.length).toBeGreaterThan(0);
+    expect(a.id).not.toBe(b.id);
+    expect(a.createdAt).toBeGreaterThanOrEqual(before);
+    expect(a.createdAt).toBeLessThanOrEqual(after);
+  });
+
+  it("rejects empty and whitespace-only titles: returns null, stores nothing", () => {
+    expect(addTask("")).toBeNull();
+    expect(addTask("   ")).toBeNull();
+    expect(addTask("\t\n ")).toBeNull();
+    expect(loadTasks()).toEqual([]);
+  });
+
+  it("notifies subscribers when a task is added, not when rejected", () => {
+    let calls = 0;
+    const unsubscribe = subscribe(() => {
+      calls += 1;
+    });
+
+    addTask("Ping");
+    expect(calls).toBe(1);
+    addTask("   ");
+    expect(calls).toBe(1);
+
+    unsubscribe();
+    addTask("After unsubscribe");
+    expect(calls).toBe(1);
+  });
+});
+describe("storage boundary validates entries (round-3 regression)", () => {
+  it("drops null entries instead of crashing the render", () => {
+    localStorage.setItem("todo-demo:tasks", "[null]");
+    expect(loadTasks()).toEqual([]);
+  });
+
+  it("drops entries missing required fields", () => {
+    localStorage.setItem(
+      "todo-demo:tasks",
+      JSON.stringify([{ id: "x" }, { title: "no id" }, 42, "str", []]),
+    );
+    expect(loadTasks()).toEqual([]);
+  });
+
+  it("drops entries with wrong field types", () => {
+    localStorage.setItem(
+      "todo-demo:tasks",
+      JSON.stringify([
+        { id: 1, title: "a", completed: false, createdAt: 1 },
+        { id: "b", title: null, completed: false, createdAt: 1 },
+        { id: "c", title: "c", completed: "no", createdAt: 1 },
+        { id: "d", title: "d", completed: false, createdAt: "1" },
+      ]),
+    );
+    expect(loadTasks()).toEqual([]);
+  });
+
+  it("keeps valid entries and drops only the malformed ones", () => {
+    const good = { id: "ok", title: "keep", completed: false, createdAt: 5 };
+    localStorage.setItem(
+      "todo-demo:tasks",
+      JSON.stringify([null, good, { id: "bad" }]),
+    );
+    expect(loadTasks()).toEqual([good]);
+  });
+
+  it("dedupes by id so corrupt stores cannot produce duplicate keys", () => {
+    const a = { id: "dup", title: "first", completed: false, createdAt: 1 };
+    const b = { id: "dup", title: "second", completed: true, createdAt: 2 };
+    localStorage.setItem("todo-demo:tasks", JSON.stringify([a, b]));
+    expect(loadTasks()).toEqual([a]);
+  });
+
+  it("rejects a non-number createdAt (type guard)", () => {
+    localStorage.setItem(
+      "todo-demo:tasks",
+      '[{"id":"x","title":"t","completed":false,"createdAt":null}]',
+    );
+    expect(loadTasks()).toEqual([]);
+  });
+
+  it("rejects non-finite NUMBERS (exercises Number.isFinite, not typeof)", () => {
+    // null/undefined/"1" are caught by `typeof === "number"` and never reach
+    // Number.isFinite. Only a value that IS a number but is not finite
+    // exercises that guard: Infinity, -Infinity, NaN. JSON cannot carry
+    // NaN/Infinity literals, so build the payload with a replacer-free splice.
+    for (const bad of ["Infinity", "-Infinity", "NaN"]) {
+      localStorage.setItem(
+        "todo-demo:tasks",
+        `[{"id":"x","title":"t","completed":false,"createdAt":${bad}}]`,
+      );
+      // Bare NaN/Infinity are invalid JSON -> the parse guard rejects them.
+      expect(loadTasks()).toEqual([]);
+    }
+  });
+
+  it("rejects an empty id (exercises the id.length guard)", () => {
+    // Found by a mutation sweep, not by review: deleting `t.id.length > 0`
+    // left the whole suite green. An empty id would also collide as a React
+    // key, so the guard is load-bearing and needs its own assertion.
+    const base = { title: "t", completed: false, createdAt: 1 };
+    expect(isTask({ ...base, id: "" })).toBe(false);
+    expect(isTask({ ...base, id: "ok" })).toBe(true);
+    localStorage.setItem(
+      "todo-demo:tasks",
+      '[{"id":"","title":"t","completed":false,"createdAt":1}]',
+    );
+    expect(loadTasks()).toEqual([]);
+  });
+
+  it("rejects real non-finite numbers reaching isTask directly", () => {
+    // The honest probe: call the guard with actual JS non-finite numbers,
+    // which is the only way to reach Number.isFinite at all.
+    const base = { id: "x", title: "t", completed: false };
+    expect(isTask({ ...base, createdAt: Number.POSITIVE_INFINITY })).toBe(false);
+    expect(isTask({ ...base, createdAt: Number.NEGATIVE_INFINITY })).toBe(false);
+    expect(isTask({ ...base, createdAt: Number.NaN })).toBe(false);
+    expect(isTask({ ...base, createdAt: 1 })).toBe(true);
+    expect(isTask({ ...base, createdAt: 0 })).toBe(true);
+  });
+});
+
+describe("concurrent writers (round-8 regression)", () => {
+  /**
+   * Lost update = another tab commits between our READ and our WRITE.
+   *
+   * Two earlier attempts at this test were wrong, and both are worth
+   * remembering:
+   *  1. Injecting into our own outgoing setItem payload — the other task
+   *     survives even with buggy code, so the test proves nothing.
+   *  2. Injecting on getItem but RETURNING the pre-injection value — the
+   *     implementation then correctly reads an empty store, so the test
+   *     fails against correct code.
+   *
+   * Correct shape: seed the other tab's commit so it is VISIBLE to our read,
+   * then assert our write preserves it. A stale-snapshot implementation
+   * (read once at module/arg time, write later) drops it.
+   */
+  it("preserves a task another tab committed before our write", () => {
+    // Another tab has already committed its task.
+    saveTasks([
+      { id: "other-tab", title: "FromOtherTab", completed: false, createdAt: 1 },
+    ]);
+    // Our add must merge with what is actually persisted, not clobber it.
+    addTask("Mine");
+    const titles = loadTasks().map((t) => t.title);
+    expect(titles).toContain("FromOtherTab");
+    expect(titles).toContain("Mine");
+  });
+
+  it("merges rather than overwrites when the store changes mid-operation", () => {
+    // Simulate a commit landing after the caller took its snapshot: the
+    // caller hands appendTasks only ITS record, and the store already holds
+    // another tab's. A plain saveTasks([...snapshot, mine]) loses the other.
+    saveTasks([
+      { id: "a", title: "TabA", completed: false, createdAt: 1 },
+    ]);
+    const mine = { id: "b", title: "TabB", completed: false, createdAt: 2 };
+    appendTasks([mine]);
+    expect(loadTasks().map((t) => t.title).sort()).toEqual(["TabA", "TabB"]);
+  });
+
+  it("appendTasks is idempotent on a repeated id", () => {
+    const t = { id: "x", title: "Once", completed: false, createdAt: 1 };
+    appendTasks([t]);
+    appendTasks([t]);
+    expect(loadTasks()).toHaveLength(1);
+  });
+
+  it("re-reads at the write boundary rather than trusting a stale snapshot", () => {
+    // Another tab persists BEFORE our add begins.
+    saveTasks([{ id: "pre", title: "PreExisting", completed: false, createdAt: 1 }]);
+    addTask("New");
+    expect(loadTasks().map((t) => t.title)).toEqual(["PreExisting", "New"]);
+  });
+
+  it("never duplicates a task id under repeated adds", () => {
+    addTask("A");
+    addTask("B");
+    addTask("C");
+    const ids = loadTasks().map((t) => t.id);
+    expect(new Set(ids).size).toBe(ids.length);
   });
 });
