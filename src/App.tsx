@@ -28,7 +28,10 @@ export default function App() {
         inputRef.current?.focus();
         return;
       }
-      const next = [...tasks, task];
+      // Read back from the store, not from React state: another tab may have
+      // persisted tasks since this component last rendered. Spreading stale
+      // `tasks` would silently drop them until reload.
+      const next = loadTasks();
       setTasks(next);
       setTitle("");
       setRejected(false);

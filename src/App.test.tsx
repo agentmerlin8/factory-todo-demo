@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import App from "./App";
-import { loadTasks } from "./store";
+import { loadTasks, saveTasks } from "./store";
 
 beforeEach(() => {
   localStorage.clear();
@@ -203,5 +203,34 @@ describe("repeated titles still announce (round-6 regression)", () => {
       seen.add(screen.getByRole("status").textContent ?? "");
     }
     expect(seen.size).toBe(3);
+  });
+});
+
+describe("cross-tab consistency (round-7 regression)", () => {
+  it("includes tasks persisted by another tab after an add", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    const input = screen.getByRole("textbox", { name: /new task/i });
+    await user.type(input, "Mine{Enter}");
+    saveTasks([
+      { id: "other", title: "FromOtherTab", completed: false, createdAt: 1 },
+      { id: "mine", title: "Mine", completed: false, createdAt: 2 },
+    ]);
+    await user.type(input, "Second{Enter}");
+    const items = screen.getAllByRole("listitem").map((n) => n.textContent);
+    expect(items.some((t) => t?.includes("FromOtherTab"))).toBe(true);
+    expect(items.some((t) => t?.includes("Second"))).toBe(true);
+  });
+
+  it("announces the true persisted total, not a stale local count", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    const input = screen.getByRole("textbox", { name: /new task/i });
+    saveTasks([
+      { id: "a", title: "A", completed: false, createdAt: 1 },
+      { id: "b", title: "B", completed: false, createdAt: 2 },
+    ]);
+    await user.type(input, "C{Enter}");
+    expect(screen.getByRole("status")).toHaveTextContent("3 tasks");
   });
 });
