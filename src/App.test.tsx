@@ -961,4 +961,26 @@ describe("TOD-4 — delete a task", () => {
       screen.getByRole("textbox", { name: /new task/i }),
     );
   });
+
+  it("focus falls back to the input when the survivor button is not mounted yet", async () => {
+    // Round-3 finding: another tab adds a NEWER task after mount; the
+    // committed snapshot picks it as the survivor, but its button is not
+    // in the DOM yet (React batches setTasks). The lookup misses — focus
+    // must still land on the input, not the body.
+    saveTasks([
+      { id: "a", title: "Alpha", completed: false, createdAt: 1 },
+      { id: "b", title: "Beta", completed: false, createdAt: 2 },
+    ]);
+    const user = userEvent.setup();
+    render(<App />);
+    saveTasks([
+      { id: "a", title: "Alpha", completed: false, createdAt: 1 },
+      { id: "b", title: "Beta", completed: false, createdAt: 2 },
+      { id: "c", title: "Gamma", completed: false, createdAt: 3 },
+    ]);
+    const btn = screen.getByRole("button", { name: "Delete Beta" });
+    btn.focus();
+    await user.keyboard("{Enter}");
+    expect(document.activeElement).not.toBe(document.body);
+  });
 });

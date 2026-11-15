@@ -127,10 +127,16 @@ export default function App() {
       );
       // The deleted row's button may have owned keyboard focus; removing
       // it drops focus to the body. Move to a surviving delete control, or
-      // the new-task input as the stable fallback (round-2 finding).
+      // the new-task input as the stable fallback (round-2 finding). The
+      // survivor may be a task another tab just added — its button is not
+      // mounted yet (React batches setTasks), so fall back whenever the
+      // lookup misses, not only when the committed list is empty (round-3).
       const survivor = next.find((t) => t.id !== id);
-      if (survivor) {
-        document.getElementById(`task-delete-${survivor.id}`)?.focus();
+      const survivorBtn = survivor
+        ? document.getElementById(`task-delete-${survivor.id}`)
+        : null;
+      if (survivorBtn) {
+        survivorBtn.focus();
       } else {
         inputRef.current?.focus();
       }
