@@ -128,13 +128,32 @@ export function appendTasks(incoming: Task[]): Task[] {
 }
 
 export function loadFilter(): Filter {
-  const raw = localStorage.getItem(FILTER_KEY);
-  return raw === "active" || raw === "completed" ? raw : "all";
+  // N3 carry-forward (TOD-2 review): a throwing getItem must not crash the
+  // mount. Tolerant load mirrors loadTasks — an unreadable filter falls back
+  // to "all" (TOD-5 AC5) instead of propagating.
+  try {
+    const raw = localStorage.getItem(FILTER_KEY);
+    return raw === "active" || raw === "completed" ? raw : "all";
+  } catch {
+    return "all";
+  }
 }
 
 export function saveFilter(filter: Filter): void {
   localStorage.setItem(FILTER_KEY, filter);
   emit();
+}
+
+/**
+ * TOD-5 — pure view filter over tasks + selection. Returns a NEW array and
+ * never mutates the input or the store (AC4: switching filters writes no
+ * task data). "all" is the identity subset; active/completed partition by
+ * the completed flag.
+ */
+export function filterTasks(tasks: Task[], filter: Filter): Task[] {
+  if (filter === "active") return tasks.filter((t) => !t.completed);
+  if (filter === "completed") return tasks.filter((t) => t.completed);
+  return [...tasks];
 }
 
 export function newId(): string {

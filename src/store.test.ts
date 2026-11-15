@@ -9,6 +9,7 @@ import {
   saveFilter,
   newId,
   deleteTask,
+  filterTasks,
   sortNewestFirst,
   subscribe,
   toggleTask,
@@ -584,5 +585,81 @@ describe("deleteTask (TOD-4)", () => {
     // access failure instead of silently treating it as "unknown id".
     expect(loadTasks()).toEqual([]);
     expect(() => deleteTask("b")).toThrow();
+  });
+});
+
+describe("TOD-5 — filter view", () => {
+  const seed = () =>
+    saveTasks([
+      { id: "a", title: "Alpha", completed: false, createdAt: 1 },
+      { id: "b", title: "Beta", completed: true, createdAt: 2 },
+      { id: "c", title: "Gamma", completed: false, createdAt: 3 },
+    ]);
+
+  describe("filterTasks helper (pure)", () => {
+    it("returns all tasks for the all filter", () => {
+      seed();
+      const tasks = loadTasks();
+      expect(filterTasks(tasks, "all").map((t) => t.id)).toEqual(["a", "b", "c"]);
+    });
+
+    it("returns only uncompleted tasks for active", () => {
+      seed();
+      expect(filterTasks(loadTasks(), "active").map((t) => t.id)).toEqual(["a", "c"]);
+    });
+
+    it("returns only completed tasks for completed", () => {
+      seed();
+      expect(filterTasks(loadTasks(), "completed").map((t) => t.id)).toEqual(["b"]);
+    });
+
+    it("is pure: does not mutate the input, returns a new array", () => {
+      seed();
+      const input = loadTasks();
+      const out = filterTasks(input, "active");
+      expect(input.map((t) => t.id)).toEqual(["a", "b", "c"]);
+      expect(out).not.toBe(input);
+    });
+
+    it("handles an empty list under every filter", () => {
+      expect(filterTasks([], "all")).toEqual([]);
+      expect(filterTasks([], "active")).toEqual([]);
+      expect(filterTasks([], "completed")).toEqual([]);
+    });
+  });
+
+  describe("filter persistence round-trip", () => {
+    it("round-trips each valid filter value", () => {
+      for (const f of ["all", "active", "completed"] as const) {
+        saveFilter(f);
+        expect(loadFilter()).toBe(f);
+      }
+    });
+
+    it("falls back to all for an invalid stored value", () => {
+      localStorage.setItem("todo-demo:filter", "not-a-filter");
+      expect(loadFilter()).toBe("all");
+    });
+
+    it("N3 carry-forward: falls back to all when getItem THROWS", () => {
+      // A throwing localStorage.getItem must not crash the mount — loadFilter
+      // wraps the access like loadTasks does (TOD-2 review N3, deferred).
+      vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+        throw new DOMException("Storage disabled", "SecurityError");
+      });
+      expect(loadFilter()).toBe("all");
+    });
+
+    it("saveFilter notifies subscribers", () => {
+      let calls = 0;
+      const unsubscribe = subscribe(() => {
+        calls += 1;
+      });
+      saveFilter("active");
+      expect(calls).toBe(1);
+      unsubscribe();
+      saveFilter("completed");
+      expect(calls).toBe(1);
+    });
   });
 });

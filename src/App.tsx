@@ -3,20 +3,35 @@ import type { FormEvent } from "react";
 import {
   addTask,
   deleteTask,
+  filterTasks,
+  loadFilter,
   loadTasks,
+  saveFilter,
   sortNewestFirst,
   toggleTask,
+  type Filter,
   type Task,
 } from "./store";
 
 /**
  * TOD-1 — add a task; TOD-2 — list tasks; TOD-3 — complete/uncomplete;
- * TOD-4 — delete a task. Form + list on the store seam (src/store.ts is
- * the only module touching localStorage). Ordering and the empty state
- * live here; filtering lands in TOD-5.
+ * TOD-4 — delete a task; TOD-5 — filter view. Form + list on the store
+ * seam (src/store.ts is the only module touching localStorage). Ordering,
+ * the empty state and filtering live here; the store owns persistence.
  */
+const FILTERS: { value: Filter; label: string }[] = [
+  { value: "all", label: "All" },
+  { value: "active", label: "Active" },
+  { value: "completed", label: "Completed" },
+];
+
+function viewLabel(filter: Filter): string {
+  return filter === "all" ? "all tasks" : `${filter} tasks`;
+}
+
 export default function App() {
   const [tasks, setTasks] = useState<Task[]>(() => sortNewestFirst(loadTasks()));
+  const [filter, setFilter] = useState<Filter>(() => loadFilter());
   const [title, setTitle] = useState("");
   const [rejected, setRejected] = useState(false);
   const [storageFailed, setStorageFailed] = useState(false);
@@ -25,6 +40,10 @@ export default function App() {
   // be told, or the action is silent (round-5 finding).
   const [announcement, setAnnouncement] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
+  // TOD-5 AC2: the visible list is the filtered subset; the count reflects
+  // it. `tasks` stays the FULL committed list so filtering never touches
+  // task data (AC4) and hidden tasks survive mutations.
+  const visible = filterTasks(tasks, filter);
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -85,6 +104,22 @@ export default function App() {
           ? `Completed ${toggled.title}. ${done} of ${next.length} done.`
           : `Marked ${toggled.title} as active. ${done} of ${next.length} done.`,
       );
+      // TOD-5: under a filter the toggled row may leave the view (completing
+      // under Active, un-completing under Completed). Its checkbox unmounts
+      // and focus would drop to the body — move to a surviving IN-VIEW
+      // control, or the input when the lookup misses (TOD-4's pattern).
+      const inView = filterTasks(next, filter);
+      if (!inView.some((t) => t.id === id)) {
+        const survivor = inView[0];
+        const survivorBtn = survivor
+          ? document.getElementById(`task-delete-${survivor.id}`)
+          : null;
+        if (survivorBtn) {
+          survivorBtn.focus();
+        } else {
+          inputRef.current?.focus();
+        }
+      }
     } catch {
       // AC5: `tasks` is untouched, so the controlled checkbox reverts to the
       // persisted state on re-render — the UI never shows an unsaved flip.
@@ -126,12 +161,13 @@ export default function App() {
         `Deleted ${result.task.title}. ${next.length} ${next.length === 1 ? "task" : "tasks"} left.`,
       );
       // The deleted row's button may have owned keyboard focus; removing
-      // it drops focus to the body. Move to a surviving delete control, or
+      // it drops focus to the body. Move to a surviving IN-VIEW delete
+      // control (a task hidden by the filter has no mounted button), or
       // the new-task input as the stable fallback (round-2 finding). The
       // survivor may be a task another tab just added — its button is not
       // mounted yet (React batches setTasks), so fall back whenever the
       // lookup misses, not only when the committed list is empty (round-3).
-      const survivor = next.find((t) => t.id !== id);
+      const survivor = filterTasks(next, filter).find((t) => t.id !== id);
       const survivorBtn = survivor
         ? document.getElementById(`task-delete-${survivor.id}`)
         : null;
@@ -144,6 +180,29 @@ export default function App() {
       // AC5: `tasks` is untouched, so the row stays visible while the store
       // still holds it — no silent loss. Shared assertive alert; clear the
       // blank-input flag first so it cannot mask the storage error.
+      setRejected(false);
+      setStorageFailed(true);
+    }
+  }
+
+  function handleFilter(next: Filter) {
+    try {
+      // AC4: persist ONLY the filter key — never the task data. The visible
+      // subset is derived from the full `tasks` state at render time.
+      saveFilter(next);
+      setFilter(next);
+      setRejected(false);
+      setStorageFailed(false);
+      // Announce the new view and its filtered count (polite region). The
+      // label + count differ per selection, so switches always re-announce.
+      const count = filterTasks(tasks, next).length;
+      setAnnouncement(
+        `Showing ${viewLabel(next)}. ${count} ${count === 1 ? "task" : "tasks"}.`,
+      );
+    } catch {
+      // A failed persist leaves the selection unchanged — no unsaved view
+      // is ever shown. Shared assertive alert; clear the blank-input flag
+      // first so it cannot mask the storage error.
       setRejected(false);
       setStorageFailed(true);
     }
@@ -206,13 +265,30 @@ export default function App() {
         {announcement}
       </p>
 
+      {/* TOD-5 AC1: All / Active / Completed. Toggle buttons carry
+          aria-pressed so the selection is exposed to assistive tech; the
+          group is labelled for screen readers. */}
+      <div className="filter-bar" role="group" aria-label="Filter tasks">
+        {FILTERS.map(({ value, label }) => (
+          <button
+            key={value}
+            type="button"
+            className="filter-button"
+            aria-pressed={filter === value}
+            onClick={() => handleFilter(value)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
       <section className="list-section" aria-label="Tasks">
         <p data-testid="task-count" className="task-count">
-          {tasks.length === 1 ? "1 task" : `${tasks.length} tasks`}
+          {visible.length === 1 ? "1 task" : `${visible.length} tasks`}
         </p>
-        {tasks.length > 0 ? (
+        {visible.length > 0 ? (
           <ul className="task-list">
-            {tasks.map((task) => (
+            {visible.map((task) => (
               <li
                 key={task.id}
                 className={
