@@ -1,11 +1,12 @@
 import { useRef, useState } from "react";
 import type { FormEvent } from "react";
-import { addTask, loadTasks, sortNewestFirst, type Task } from "./store";
+import { addTask, loadTasks, sortNewestFirst, toggleTask, type Task } from "./store";
 
 /**
- * TOD-1 — add a task; TOD-2 — list tasks. Form + list on the store seam
- * (src/store.ts is the only module touching localStorage). Ordering and the
- * empty state live here; toggling, deleting and filtering land in TOD-3…5.
+ * TOD-1 — add a task; TOD-2 — list tasks; TOD-3 — complete/uncomplete.
+ * Form + list on the store seam (src/store.ts is the only module touching
+ * localStorage). Ordering and the empty state live here; deleting and
+ * filtering land in TOD-4…5.
  */
 export default function App() {
   const [tasks, setTasks] = useState<Task[]>(() => sortNewestFirst(loadTasks()));
@@ -48,6 +49,29 @@ export default function App() {
     } catch {
       setStorageFailed(true);
       inputRef.current?.focus();
+    }
+  }
+
+  function handleToggle(id: string) {
+    try {
+      const toggled = toggleTask(id);
+      if (!toggled) return;
+      // Read back from the store (same discipline as add): another tab may
+      // have committed tasks since this component last rendered.
+      setTasks(sortNewestFirst(loadTasks()));
+      setStorageFailed(false);
+      // Distinct text per direction, so consecutive toggles always differ
+      // and the live region re-announces (identical text does not).
+      setAnnouncement(
+        toggled.completed
+          ? `Completed ${toggled.title}.`
+          : `Marked ${toggled.title} as active.`,
+      );
+    } catch {
+      // AC5: `tasks` is untouched, so the controlled checkbox reverts to the
+      // persisted state on re-render — the UI never shows an unsaved flip.
+      // The failure surfaces on the same assertive alert the add form uses.
+      setStorageFailed(true);
     }
   }
 
@@ -115,8 +139,21 @@ export default function App() {
         {tasks.length > 0 ? (
           <ul className="task-list">
             {tasks.map((task) => (
-              <li key={task.id} className="task-item">
-                <span className="task-dot" aria-hidden="true" />
+              <li
+                key={task.id}
+                className={
+                  task.completed ? "task-item task-item--completed" : "task-item"
+                }
+              >
+                {/* TOD-3 AC1: the checkbox takes the marker slot the decorative
+                    dot held. Controlled by the store-backed state, so a failed
+                    persist reverts it (AC5) instead of showing an unsaved flip. */}
+                <input
+                  type="checkbox"
+                  checked={task.completed}
+                  onChange={() => handleToggle(task.id)}
+                  aria-label={task.title}
+                />
                 <span className="task-title">{task.title}</span>
               </li>
             ))}

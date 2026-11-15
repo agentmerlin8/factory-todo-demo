@@ -375,6 +375,13 @@ h1::after {
   color: var(--ink);
 }
 
+/* TOD-3 AC2 — completed state. Muted ink stays AA: --ink-soft on
+   --surface-raised is 5.8:1 (light) / 6.5:1 (dark). */
+.task-item--completed .task-title {
+  text-decoration: line-through;
+  color: var(--ink-soft);
+}
+
 /* ── Footer ────────────────────────────────────────────────────── */
 
 .app-footer {

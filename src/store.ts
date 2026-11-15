@@ -155,3 +155,27 @@ export function addTask(title: string): Task | null {
   appendTasks([task]);
   return task;
 }
+
+/**
+ * TOD-3 — flip one task's `completed` flag. Reads the current store
+ * immediately before the write (same minimum-window discipline as
+ * appendTasks), so a concurrent commit from another tab is preserved.
+ * Returns the updated task, or null when the id is unknown (no write, no
+ * notification). A storage failure propagates BEFORE emit and before any
+ * caller can render the new state — nothing unsaved is ever announced
+ * (TOD-3 AC5).
+ */
+export function toggleTask(id: string): Task | null {
+  const current = loadTasks();
+  const index = current.findIndex((t) => t.id === id);
+  if (index === -1) return null;
+  const toggled: Task = {
+    ...current[index],
+    completed: !current[index].completed,
+  };
+  const next = [...current];
+  next[index] = toggled;
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+  emit();
+  return toggled;
+}

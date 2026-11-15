@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   addTask,
   appendTasks,
@@ -10,11 +10,16 @@ import {
   newId,
   sortNewestFirst,
   subscribe,
+  toggleTask,
   type Task,
 } from "./store";
 
 beforeEach(() => {
   localStorage.clear();
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 describe("store persistence seam", () => {
@@ -291,5 +296,103 @@ describe("sortNewestFirst (TOD-2)", () => {
 
   it("handles an empty list", () => {
     expect(sortNewestFirst([])).toEqual([]);
+  });
+});
+
+describe("toggleTask (TOD-3)", () => {
+  const seed = (completed: boolean): Task => {
+    const task: Task = {
+      id: "a",
+      title: "Toggle me",
+      completed,
+      createdAt: 1,
+    };
+    saveTasks([task]);
+    return task;
+  };
+
+  it("flips completed and persists it", () => {
+    const original = seed(false);
+    const toggled = toggleTask("a");
+    expect(toggled).not.toBeNull();
+    expect(toggled?.completed).toBe(true);
+    expect(loadTasks()).toEqual([{ ...original, completed: true }]);
+  });
+
+  it("double-toggle restores the original record exactly", () => {
+    const original = seed(false);
+    toggleTask("a");
+    const restored = toggleTask("a");
+    expect(restored).toEqual(original);
+    expect(loadTasks()).toEqual([original]);
+  });
+
+  it("toggles only the target task, leaving siblings untouched", () => {
+    saveTasks([
+      { id: "a", title: "Target", completed: false, createdAt: 1 },
+      { id: "b", title: "Bystander", completed: true, createdAt: 2 },
+    ]);
+    toggleTask("a");
+    const tasks = loadTasks();
+    expect(tasks.find((t) => t.id === "a")?.completed).toBe(true);
+    expect(tasks.find((t) => t.id === "b")).toEqual({
+      id: "b",
+      title: "Bystander",
+      completed: true,
+      createdAt: 2,
+    });
+  });
+
+  it("preserves tasks another tab committed before our write", () => {
+    seed(false);
+    saveTasks([
+      { id: "a", title: "Toggle me", completed: false, createdAt: 1 },
+      { id: "other", title: "FromOtherTab", completed: false, createdAt: 2 },
+    ]);
+    toggleTask("a");
+    expect(loadTasks().map((t) => t.id).sort()).toEqual(["a", "other"]);
+    expect(loadTasks().find((t) => t.id === "a")?.completed).toBe(true);
+  });
+
+  it("notifies subscribers once per successful toggle", () => {
+    seed(false);
+    let calls = 0;
+    const unsubscribe = subscribe(() => {
+      calls += 1;
+    });
+    toggleTask("a");
+    expect(calls).toBe(1);
+    toggleTask("a");
+    expect(calls).toBe(2);
+    unsubscribe();
+    toggleTask("a");
+    expect(calls).toBe(2);
+  });
+
+  it("returns null for an unknown id, leaving the store untouched", () => {
+    const original = seed(false);
+    let calls = 0;
+    const unsubscribe = subscribe(() => {
+      calls += 1;
+    });
+    expect(toggleTask("missing")).toBeNull();
+    expect(loadTasks()).toEqual([original]);
+    expect(calls).toBe(0);
+    unsubscribe();
+  });
+
+  it("propagates storage failures without mutating storage or notifying", () => {
+    const original = seed(false);
+    let calls = 0;
+    const unsubscribe = subscribe(() => {
+      calls += 1;
+    });
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("Quota exceeded", "QuotaExceededError");
+    });
+    expect(() => toggleTask("a")).toThrow();
+    expect(loadTasks()).toEqual([original]);
+    expect(calls).toBe(0);
+    unsubscribe();
   });
 });
