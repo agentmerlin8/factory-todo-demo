@@ -58,19 +58,27 @@ export default function App() {
       if (!toggled) return;
       // Read back from the store (same discipline as add): another tab may
       // have committed tasks since this component last rendered.
-      setTasks(sortNewestFirst(loadTasks()));
+      const next = sortNewestFirst(loadTasks());
+      setTasks(next);
       setStorageFailed(false);
-      // Distinct text per direction, so consecutive toggles always differ
-      // and the live region re-announces (identical text does not).
+      // Include the completed count: direction-specific wording alone does
+      // NOT distinguish completing two DIFFERENT tasks with the same title
+      // (identical live-region text never re-announces — round-2 finding,
+      // same class as the TOD-1 add announcement).
+      const done = next.filter((t) => t.completed).length;
       setAnnouncement(
         toggled.completed
-          ? `Completed ${toggled.title}.`
-          : `Marked ${toggled.title} as active.`,
+          ? `Completed ${toggled.title}. ${done} of ${next.length} done.`
+          : `Marked ${toggled.title} as active. ${done} of ${next.length} done.`,
       );
     } catch {
       // AC5: `tasks` is untouched, so the controlled checkbox reverts to the
       // persisted state on re-render — the UI never shows an unsaved flip.
       // The failure surfaces on the same assertive alert the add form uses.
+      // Clear a pending blank-input rejection first: the shared alert
+      // prioritizes `rejected`, which would otherwise mask the storage
+      // error with "Give the task a name" (round-2 finding).
+      setRejected(false);
       setStorageFailed(true);
     }
   }

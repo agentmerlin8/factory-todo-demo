@@ -49,23 +49,39 @@ export function isTask(value: unknown): value is Task {
   );
 }
 
+/**
+ * Strict read for MUTATION paths: storage-access errors propagate so the
+ * caller can surface them (round-2 finding: a read failure during toggle
+ * was swallowed into "unknown id" and the UI stayed silent). Corrupt JSON
+ * and malformed entries are still tolerated — that is data validation,
+ * not an access failure.
+ */
+function readTasksStrict(): Task[] {
+  const raw = localStorage.getItem(STORAGE_KEY); // throws on access failure
+  if (!raw) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(parsed)) return [];
+  const seen = new Set<string>();
+  const tasks: Task[] = [];
+  for (const entry of parsed) {
+    if (!isTask(entry) || seen.has(entry.id)) continue;
+    seen.add(entry.id);
+    tasks.push(entry);
+  }
+  return tasks;
+}
+
 export function loadTasks(): Task[] {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    // Drop malformed entries instead of crashing the mount. Dedupe by id so a
-    // corrupt store cannot produce duplicate React keys.
-    const seen = new Set<string>();
-    const tasks: Task[] = [];
-    for (const entry of parsed) {
-      if (!isTask(entry) || seen.has(entry.id)) continue;
-      seen.add(entry.id);
-      tasks.push(entry);
-    }
-    return tasks;
+    return readTasksStrict();
   } catch {
+    // Tolerant load for initial rendering: an unreadable store renders the
+    // empty state instead of crashing the mount (TOD-2 AC5).
     return [];
   }
 }
@@ -168,12 +184,12 @@ export function addTask(title: string): Task | null {
  * (TOD-3 AC5).
  */
 export function toggleTask(id: string): Task | null {
-  const current = loadTasks();
+  const current = readTasksStrict();
   if (!current.some((t) => t.id === id)) return null;
   // Re-read + merge immediately before setItem (see appendTasks). A plain
   // array overwrite here would drop a concurrent tab's committed task —
   // mutation-proven in the round-1 review probe.
-  const fresh = loadTasks();
+  const fresh = readTasksStrict();
   const byId = new Map(fresh.map((t) => [t.id, t]));
   const base = byId.get(id);
   if (!base) return null; // removed by another tab between reads

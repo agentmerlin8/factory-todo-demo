@@ -427,4 +427,16 @@ describe("toggleTask (TOD-3)", () => {
     expect(calls).toBe(0);
     unsubscribe();
   });
+
+  it("propagates storage READ errors (round-2: no silent unknown-id)", () => {
+    seed(false);
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new DOMException("Storage disabled", "SecurityError");
+    });
+    // The tolerant loadTasks still renders empty; the mutation path must
+    // surface the access failure so the UI can alert instead of staying
+    // silent on an "unknown id".
+    expect(loadTasks()).toEqual([]);
+    expect(() => toggleTask("a")).toThrow();
+  });
 });

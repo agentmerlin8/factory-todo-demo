@@ -557,4 +557,54 @@ describe("TOD-3 — complete / uncomplete", () => {
     expect(screen.queryByRole("alert")).toBeNull();
     expect(screen.getByRole("checkbox", { name: "Ship the story" })).toBeChecked();
   });
+
+  it("completing two same-title tasks announces both (count distinguishes)", async () => {
+    // Round-2 finding: direction-specific wording alone produced identical
+    // live-region text for two different tasks with the same title — the
+    // second success never re-announced. The completed count distinguishes.
+    saveTasks([
+      { id: "a", title: "Same name", completed: false, createdAt: 1 },
+      { id: "b", title: "Same name", completed: false, createdAt: 2 },
+    ]);
+    const user = userEvent.setup();
+    render(<App />);
+    const boxes = screen.getAllByRole("checkbox", { name: "Same name" });
+    await user.click(boxes[0]);
+    const first = screen.getByRole("status").textContent;
+    await user.click(boxes[1]);
+    const second = screen.getByRole("status").textContent;
+    expect(first).toMatch(/Completed Same name/);
+    expect(second).not.toBe(first);
+    expect(second).toMatch(/2 of 2 done/);
+  });
+
+  it("a toggle storage failure is not masked by a pending blank-input rejection", async () => {
+    // Round-2 finding: the shared alert prioritizes `rejected`; without
+    // clearing it in the toggle failure path the user saw "Give the task a
+    // name" instead of the storage error.
+    saveTasks([{ id: "a", title: "Task", completed: false, createdAt: 1 }]);
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: /^add$/i }));
+    expect(screen.getByRole("alert")).toHaveTextContent(/give the task a name/i);
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("Quota exceeded", "QuotaExceededError");
+    });
+    await user.click(screen.getByRole("checkbox", { name: "Task" }));
+    expect(screen.getByRole("alert")).toHaveTextContent(/couldn’t be saved/i);
+  });
+
+  it("a storage READ failure during toggle surfaces the alert, not silence", async () => {
+    // Round-2 finding: loadTasks swallowed the read error into "unknown id"
+    // and the UI stayed silent. Mutation reads now propagate access errors.
+    saveTasks([{ id: "a", title: "Task", completed: false, createdAt: 1 }]);
+    const user = userEvent.setup();
+    render(<App />);
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new DOMException("Storage disabled", "SecurityError");
+    });
+    await user.click(screen.getByRole("checkbox", { name: "Task" }));
+    expect(screen.getByRole("alert")).toHaveTextContent(/couldn’t be saved/i);
+    expect(screen.getByRole("checkbox", { name: "Task" })).not.toBeChecked();
+  });
 });
