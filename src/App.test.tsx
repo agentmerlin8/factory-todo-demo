@@ -132,3 +132,50 @@ describe("malformed storage does not break mount (round-3 regression)", () => {
     expect(screen.getByRole("listitem")).toHaveTextContent("Valid");
   });
 });
+
+describe("screen-reader announcements (round-5 regression)", () => {
+  it("exposes a polite live region on mount", () => {
+    render(<App />);
+    const status = screen.getByRole("status");
+    expect(status).toHaveAttribute("aria-live", "polite");
+    expect(status).toHaveAttribute("aria-atomic", "true");
+  });
+
+  it("announces a successful add", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    const input = screen.getByRole("textbox", { name: /new task/i });
+    await user.type(input, "Announce me{Enter}");
+    expect(screen.getByRole("status")).toHaveTextContent("Added Announce me.");
+  });
+
+  it("announces each subsequent add", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    const input = screen.getByRole("textbox", { name: /new task/i });
+    await user.type(input, "First{Enter}");
+    await user.type(input, "Second{Enter}");
+    expect(screen.getByRole("status")).toHaveTextContent("Added Second.");
+  });
+
+  it("does not announce a rejected empty submit", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: /^add$/i }));
+    expect(screen.getByRole("status")).toHaveTextContent("");
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+  });
+
+  it("keeps errors on the assertive alert, successes on the polite status", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("Quota exceeded", "QuotaExceededError");
+    });
+    render(<App />);
+    const input = screen.getByRole("textbox", { name: /new task/i });
+    await user.type(input, "Doomed{Enter}");
+    expect(screen.getByRole("alert")).toHaveTextContent(/couldn’t be saved/i);
+    expect(screen.getByRole("status")).toHaveTextContent("");
+    vi.restoreAllMocks();
+  });
+});

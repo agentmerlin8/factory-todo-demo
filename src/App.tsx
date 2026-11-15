@@ -12,6 +12,10 @@ export default function App() {
   const [title, setTitle] = useState("");
   const [rejected, setRejected] = useState(false);
   const [storageFailed, setStorageFailed] = useState(false);
+  // Polite live region: every successful mutation is announced, not just
+  // errors. A sighted user sees the list change; a screen-reader user must
+  // be told, or the action is silent (round-5 finding).
+  const [announcement, setAnnouncement] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -28,6 +32,7 @@ export default function App() {
       setTitle("");
       setRejected(false);
       setStorageFailed(false);
+      setAnnouncement(`Added ${task.title}.`);
       inputRef.current?.focus();
     } catch {
       setStorageFailed(true);
@@ -85,6 +90,12 @@ export default function App() {
               : "Press Enter or hit Add. Everything stays in this browser."}
         </p>
       </form>
+
+      {/* Always mounted: a live region added at the same time as its text is
+          frequently missed by screen readers. */}
+      <p className="visually-hidden" role="status" aria-live="polite" aria-atomic="true">
+        {announcement}
+      </p>
 
       <section className="list-section" aria-label="Tasks">
         <p data-testid="task-count" className="task-count">
