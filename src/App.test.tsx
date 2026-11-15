@@ -607,4 +607,35 @@ describe("TOD-3 — complete / uncomplete", () => {
     expect(screen.getByRole("alert")).toHaveTextContent(/couldn’t be saved/i);
     expect(screen.getByRole("checkbox", { name: "Task" })).not.toBeChecked();
   });
+
+  it("a POST-WRITE read failure keeps the committed list visible (round-3)", async () => {
+    // The write succeeds; only the readback fails. Rendering from the
+    // committed snapshot (not a fresh read) keeps tasks, counts and the
+    // announcement truthful instead of wiping the list to "0 of 0 done".
+    saveTasks([
+      { id: "a", title: "Alpha", completed: false, createdAt: 1 },
+      { id: "b", title: "Beta", completed: false, createdAt: 2 },
+    ]);
+    const user = userEvent.setup();
+    render(<App />);
+    const realGet = Storage.prototype.getItem;
+    let gets = 0;
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(function (
+      this: Storage, key: string,
+    ) {
+      if (key === "todo-demo:tasks") {
+        gets += 1;
+        if (gets >= 3) {
+          throw new DOMException("Storage disabled", "SecurityError");
+        }
+      }
+      return realGet.call(this, key);
+    });
+    await user.click(screen.getByRole("checkbox", { name: "Beta" }));
+    expect(screen.getAllByRole("listitem")).toHaveLength(2);
+    expect(screen.getByRole("checkbox", { name: "Beta" })).toBeChecked();
+    expect(screen.getByTestId("task-count")).toHaveTextContent("2 tasks");
+    expect(screen.getByRole("status")).toHaveTextContent(/1 of 2 done/);
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
 });

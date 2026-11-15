@@ -313,9 +313,10 @@ describe("toggleTask (TOD-3)", () => {
 
   it("flips completed and persists it", () => {
     const original = seed(false);
-    const toggled = toggleTask("a");
-    expect(toggled).not.toBeNull();
-    expect(toggled?.completed).toBe(true);
+    const result = toggleTask("a");
+    expect(result).not.toBeNull();
+    expect(result?.task.completed).toBe(true);
+    expect(result?.tasks).toEqual([{ ...original, completed: true }]);
     expect(loadTasks()).toEqual([{ ...original, completed: true }]);
   });
 
@@ -323,7 +324,7 @@ describe("toggleTask (TOD-3)", () => {
     const original = seed(false);
     toggleTask("a");
     const restored = toggleTask("a");
-    expect(restored).toEqual(original);
+    expect(restored?.task).toEqual(original);
     expect(loadTasks()).toEqual([original]);
   });
 

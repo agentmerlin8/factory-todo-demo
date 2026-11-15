@@ -54,11 +54,13 @@ export default function App() {
 
   function handleToggle(id: string) {
     try {
-      const toggled = toggleTask(id);
-      if (!toggled) return;
-      // Read back from the store (same discipline as add): another tab may
-      // have committed tasks since this component last rendered.
-      const next = sortNewestFirst(loadTasks());
+      const result = toggleTask(id);
+      if (!result) return;
+      const toggled = result.task;
+      // Render from the COMMITTED snapshot the store just wrote — a
+      // post-write readback is a fresh fallible I/O that can fail after a
+      // successful save and wipe the visible list (round-3 finding).
+      const next = sortNewestFirst(result.tasks);
       setTasks(next);
       setStorageFailed(false);
       // Include the completed count: direction-specific wording alone does

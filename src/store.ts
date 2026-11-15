@@ -183,7 +183,15 @@ export function addTask(title: string): Task | null {
  * caller can render the new state — nothing unsaved is ever announced
  * (TOD-3 AC5).
  */
-export function toggleTask(id: string): Task | null {
+export interface ToggleResult {
+  task: Task;
+  /** The exact list committed by this write. Callers render from THIS
+   * snapshot — a post-write readback is a fresh fallible I/O that can fail
+   * after a successful save and wipe the visible list (round-3 finding). */
+  tasks: Task[];
+}
+
+export function toggleTask(id: string): ToggleResult | null {
   const current = readTasksStrict();
   if (!current.some((t) => t.id === id)) return null;
   // Re-read + merge immediately before setItem (see appendTasks). A plain
@@ -195,7 +203,8 @@ export function toggleTask(id: string): Task | null {
   if (!base) return null; // removed by another tab between reads
   const toggled: Task = { ...base, completed: !base.completed };
   byId.set(id, toggled);
-  localStorage.setItem(STORAGE_KEY, JSON.stringify([...byId.values()]));
+  const committed = [...byId.values()];
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(committed));
   emit();
-  return toggled;
+  return { task: toggled, tasks: committed };
 }
