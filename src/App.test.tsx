@@ -296,6 +296,13 @@ describe("TOD-2 — list tasks", () => {
     await user.type(input, "First{Enter}");
     await user.type(input, "Second{Enter}");
     expect(loadTasks().map((t) => t.title)).toEqual(["First", "Second"]);
+    // Assert the RENDERED order immediately after adding, before unmount:
+    // storage order alone would not catch a missing post-add sort (Copilot
+    // round-2 finding — mutation-verified: deleting the post-add sort left
+    // the whole suite green until this assertion existed).
+    expect(
+      screen.getAllByRole("listitem").map((n) => n.textContent),
+    ).toEqual(["Second", "First"]);
 
     // Simulate a page reload: tear down, mount fresh from the same store.
     unmount();
