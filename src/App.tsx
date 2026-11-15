@@ -70,6 +70,11 @@ export default function App() {
       const next = sortNewestFirst(result.tasks);
       setTasks(next);
       setStorageFailed(false);
+      // A successful mutation also clears any pending blank-input rejection:
+      // the shared alert prioritizes `rejected`, which would otherwise keep
+      // showing "Give the task a name" after a successful toggle (round-1
+      // finding; same class as the failure-path masking fixed in TOD-3).
+      setRejected(false);
       // Include the completed count: direction-specific wording alone does
       // NOT distinguish completing two DIFFERENT tasks with the same title
       // (identical live-region text never re-announces — round-2 finding,
@@ -102,6 +107,10 @@ export default function App() {
       const next = sortNewestFirst(result.tasks);
       setTasks(next);
       setStorageFailed(false);
+      // Clear a pending blank-input rejection on success too — a stale
+      // assertive "Give the task a name" after a successful delete is
+      // misleading (round-1 finding, same class as the toggle path).
+      setRejected(false);
       // Operation-specific wording plus the remaining count: two deletes
       // of same-title tasks must still re-announce (identical live-region
       // text never fires twice — same class as the add/toggle findings).

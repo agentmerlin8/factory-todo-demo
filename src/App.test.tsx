@@ -878,4 +878,31 @@ describe("TOD-4 — delete a task", () => {
       style.remove();
     }
   });
+
+  it("a successful delete clears a pending blank-input rejection", async () => {
+    // Round-1 finding: the shared alert prioritizes `rejected`; without
+    // clearing it on success the user saw a stale "Give the task a name"
+    // assertive alert after a successful delete.
+    saveTasks([{ id: "a", title: "Task", completed: false, createdAt: 1 }]);
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: /^add$/i }));
+    expect(screen.getByRole("alert")).toHaveTextContent(/give the task a name/i);
+    await user.click(screen.getByRole("button", { name: "Delete Task" }));
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByRole("status")).toHaveTextContent(/Deleted Task/);
+  });
+
+  it("a successful toggle clears a pending blank-input rejection", async () => {
+    // Same class in the toggle success path (pre-existing TOD-3 defect,
+    // found by the TOD-4 review — fixed here with its own regression).
+    saveTasks([{ id: "a", title: "Task", completed: false, createdAt: 1 }]);
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: /^add$/i }));
+    expect(screen.getByRole("alert")).toHaveTextContent(/give the task a name/i);
+    await user.click(screen.getByRole("checkbox", { name: "Task" }));
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByRole("status")).toHaveTextContent(/Completed Task/);
+  });
 });
