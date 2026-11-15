@@ -315,6 +315,24 @@ h1::after {
   font-weight: 600;
 }
 
+/* ── Filter bar (TOD-5) ────────────────────────────────────────── */
+
+.filter-bar { display: flex; gap: 0.5rem; margin-top: 1.2rem; }
+.filter-button {
+  font: inherit; font-size: 0.85rem; font-weight: 600;
+  padding: 0.35rem 0.9rem; cursor: pointer;
+  color: var(--ink-soft); background: var(--surface);
+  border: 1px solid var(--rule); border-radius: 999px;
+}
+.filter-button[aria-pressed="true"] {
+  color: var(--persimmon-deep); border-color: var(--persimmon);
+  /* Solid, not the wash: wash-over-gradient hit ~4.2:1 (round-1 NIT-1). */
+  background: var(--surface-raised);
+}
+.filter-button:focus-visible {
+  outline: 2px solid var(--focus-indicator); outline-offset: 2px;
+}
+
 /* ── Task list ─────────────────────────────────────────────────── */
 
 .list-section {

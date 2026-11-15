@@ -160,7 +160,7 @@ describe("screen-reader announcements (round-5 regression)", () => {
     render(<App />);
     const input = screen.getByRole("textbox", { name: /new task/i });
     await user.type(input, "Announce me{Enter}");
-    expect(screen.getByRole("status")).toHaveTextContent("Added Announce me. 1 task.");
+    expect(screen.getByRole("status")).toHaveTextContent("Added Announce me. 1 task shown.");
   });
 
   it("announces each subsequent add", async () => {
@@ -169,7 +169,7 @@ describe("screen-reader announcements (round-5 regression)", () => {
     const input = screen.getByRole("textbox", { name: /new task/i });
     await user.type(input, "First{Enter}");
     await user.type(input, "Second{Enter}");
-    expect(screen.getByRole("status")).toHaveTextContent("Added Second. 2 tasks.");
+    expect(screen.getByRole("status")).toHaveTextContent("Added Second. 2 tasks shown.");
   });
 
   it("does not announce a rejected empty submit", async () => {
@@ -575,7 +575,7 @@ describe("TOD-3 — complete / uncomplete", () => {
     const second = screen.getByRole("status").textContent;
     expect(first).toMatch(/Completed Same name/);
     expect(second).not.toBe(first);
-    expect(second).toMatch(/2 of 2 done/);
+    expect(second).toMatch(/2 of 2 shown done/);
   });
 
   it("a toggle storage failure is not masked by a pending blank-input rejection", async () => {
@@ -635,7 +635,7 @@ describe("TOD-3 — complete / uncomplete", () => {
     expect(screen.getAllByRole("listitem")).toHaveLength(2);
     expect(screen.getByRole("checkbox", { name: "Beta" })).toBeChecked();
     expect(screen.getByTestId("task-count")).toHaveTextContent("2 tasks");
-    expect(screen.getByRole("status")).toHaveTextContent(/1 of 2 done/);
+    expect(screen.getByRole("status")).toHaveTextContent(/1 of 2 shown done/);
     expect(screen.queryByRole("alert")).toBeNull();
   });
 });
@@ -864,7 +864,11 @@ describe("TOD-4 — delete a task", () => {
       render(<App />);
       const user = userEvent.setup();
       // autoFocus starts on the input; keyboard Tab activates :focus-visible.
+      // TOD-5 added the All/Active/Completed buttons between Add and the list.
       await user.tab(); // Add
+      await user.tab(); // All filter
+      await user.tab(); // Active filter
+      await user.tab(); // Completed filter
       await user.tab(); // newest checkbox
       await user.tab(); // newest delete button
       const button = screen.getByRole("button", {
@@ -982,5 +986,397 @@ describe("TOD-4 — delete a task", () => {
     btn.focus();
     await user.keyboard("{Enter}");
     expect(document.activeElement).not.toBe(document.body);
+  });
+});
+
+describe("TOD-5 — filter view", () => {
+  // Newest-first render order: Gamma (active), Beta (done), Alpha (active).
+  const seedMixed = () =>
+    saveTasks([
+      { id: "a", title: "Alpha", completed: false, createdAt: 1 },
+      { id: "b", title: "Beta", completed: true, createdAt: 2 },
+      { id: "c", title: "Gamma", completed: false, createdAt: 3 },
+    ]);
+
+  it("AC1: three filter controls — All / Active / Completed, All selected by default", () => {
+    render(<App />);
+    const all = screen.getByRole("button", { name: "All" });
+    const active = screen.getByRole("button", { name: "Active" });
+    const completed = screen.getByRole("button", { name: "Completed" });
+    expect(all).toHaveAttribute("aria-pressed", "true");
+    expect(active).toHaveAttribute("aria-pressed", "false");
+    expect(completed).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("AC2: each filter shows the right tasks, newest-first", async () => {
+    seedMixed();
+    const user = userEvent.setup();
+    render(<App />);
+    expect(screen.getAllByRole("listitem").map((n) => n.textContent)).toEqual([
+      "Gamma", "Beta", "Alpha",
+    ]);
+    await user.click(screen.getByRole("button", { name: "Active" }));
+    expect(screen.getAllByRole("listitem").map((n) => n.textContent)).toEqual([
+      "Gamma", "Alpha",
+    ]);
+    await user.click(screen.getByRole("button", { name: "Completed" }));
+    expect(screen.getAllByRole("listitem").map((n) => n.textContent)).toEqual([
+      "Beta",
+    ]);
+    await user.click(screen.getByRole("button", { name: "All" }));
+    expect(screen.getAllByRole("listitem").map((n) => n.textContent)).toEqual([
+      "Gamma", "Beta", "Alpha",
+    ]);
+  });
+
+  it("AC2: the count reflects the FILTERED set, with singular wording", async () => {
+    seedMixed();
+    const user = userEvent.setup();
+    render(<App />);
+    expect(screen.getByTestId("task-count")).toHaveTextContent("3 tasks");
+    await user.click(screen.getByRole("button", { name: "Active" }));
+    expect(screen.getByTestId("task-count")).toHaveTextContent("2 tasks");
+    await user.click(screen.getByRole("button", { name: "Completed" }));
+    expect(screen.getByTestId("task-count").textContent).toBe("1 task");
+  });
+
+  it("AC3: filter selection survives reload", async () => {
+    seedMixed();
+    const user = userEvent.setup();
+    const { unmount } = render(<App />);
+    await user.click(screen.getByRole("button", { name: "Completed" }));
+    expect(localStorage.getItem("todo-demo:filter")).toBe("completed");
+
+    // Simulate a page reload: tear down, mount fresh from the same store.
+    unmount();
+    render(<App />);
+    expect(screen.getByRole("button", { name: "Completed" })).toHaveAttribute(
+      "aria-pressed", "true",
+    );
+    expect(screen.getAllByRole("listitem").map((n) => n.textContent)).toEqual([
+      "Beta",
+    ]);
+    expect(screen.getByTestId("task-count")).toHaveTextContent("1 task");
+  });
+
+  it("AC4: switching filters never writes task data", async () => {
+    seedMixed();
+    const before = localStorage.getItem("todo-demo:tasks");
+    const original = loadTasks();
+    const user = userEvent.setup();
+    render(<App />);
+    const writes = vi.spyOn(Storage.prototype, "setItem");
+    await user.click(screen.getByRole("button", { name: "Active" }));
+    await user.click(screen.getByRole("button", { name: "Completed" }));
+    await user.click(screen.getByRole("button", { name: "All" }));
+    // The filter key may be written; the TASK key must never be touched.
+    for (const call of writes.mock.calls) {
+      expect(call[0]).not.toBe("todo-demo:tasks");
+    }
+    expect(localStorage.getItem("todo-demo:tasks")).toBe(before);
+    expect(loadTasks()).toEqual(original);
+  });
+
+  it("AC5: an invalid stored filter falls back to All", () => {
+    seedMixed();
+    localStorage.setItem("todo-demo:filter", "bogus");
+    render(<App />);
+    expect(screen.getByRole("button", { name: "All" })).toHaveAttribute(
+      "aria-pressed", "true",
+    );
+    expect(screen.getAllByRole("listitem")).toHaveLength(3);
+  });
+
+  it("AC5: an unreadable filter (getItem throws) falls back to All, tasks still render", () => {
+    seedMixed();
+    const realGet = Storage.prototype.getItem;
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(function (
+      this: Storage, key: string,
+    ) {
+      if (key === "todo-demo:filter") {
+        throw new DOMException("Storage disabled", "SecurityError");
+      }
+      return realGet.call(this, key);
+    });
+    render(<App />);
+    expect(screen.getByRole("button", { name: "All" })).toHaveAttribute(
+      "aria-pressed", "true",
+    );
+    expect(screen.getAllByRole("listitem")).toHaveLength(3);
+  });
+
+  it("AC5: totally unreadable storage still mounts (empty state, All selected)", () => {
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new DOMException("Storage disabled", "SecurityError");
+    });
+    render(<App />);
+    expect(screen.getByRole("heading", { name: /to-do/i })).toBeInTheDocument();
+    expect(screen.getByTestId("empty-state")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "All" })).toHaveAttribute(
+      "aria-pressed", "true",
+    );
+  });
+
+  it("filter switches announce the new view and its count, distinctly", async () => {
+    seedMixed();
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "Active" }));
+    const active = screen.getByRole("status").textContent;
+    expect(active).toMatch(/active/i);
+    expect(active).toMatch(/2 tasks/);
+    await user.click(screen.getByRole("button", { name: "Completed" }));
+    const completed = screen.getByRole("status").textContent;
+    expect(completed).toMatch(/completed/i);
+    expect(completed).toMatch(/1 task/);
+    expect(completed).not.toBe(active);
+    // View announcements stay on the polite region, never the alert.
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("a filter switch clears a pending blank-input rejection", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: /^add$/i }));
+    expect(screen.getByRole("alert")).toHaveTextContent(/give the task a name/i);
+    await user.click(screen.getByRole("button", { name: "Active" }));
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("a filter switch clears a prior storage-failure alert", async () => {
+    seedMixed();
+    const user = userEvent.setup();
+    render(<App />);
+    const spy = vi
+      .spyOn(Storage.prototype, "setItem")
+      .mockImplementation(() => {
+        throw new DOMException("Quota exceeded", "QuotaExceededError");
+      });
+    await user.click(screen.getByRole("checkbox", { name: "Gamma" }));
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+    spy.mockRestore();
+    await user.click(screen.getByRole("button", { name: "Active" }));
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByRole("status")).toHaveTextContent(/active/i);
+  });
+
+  it("a failed filter save alerts assertively and keeps the current selection", async () => {
+    seedMixed();
+    const user = userEvent.setup();
+    render(<App />);
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("Quota exceeded", "QuotaExceededError");
+    });
+    await user.click(screen.getByRole("button", { name: "Completed" }));
+    expect(screen.getByRole("alert")).toHaveTextContent(/couldn’t be saved/i);
+    // Selection reverted: All still pressed, full list still visible.
+    expect(screen.getByRole("button", { name: "All" })).toHaveAttribute(
+      "aria-pressed", "true",
+    );
+    expect(screen.getAllByRole("listitem")).toHaveLength(3);
+    expect(screen.getByRole("status")).toHaveTextContent("");
+  });
+
+  it("a failed filter save is not masked by a pending blank-input rejection", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: /^add$/i }));
+    expect(screen.getByRole("alert")).toHaveTextContent(/give the task a name/i);
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("Quota exceeded", "QuotaExceededError");
+    });
+    await user.click(screen.getByRole("button", { name: "Active" }));
+    expect(screen.getByRole("alert")).toHaveTextContent(/couldn’t be saved/i);
+  });
+
+  it("toggling under the Active filter drops the row from view, not the store", async () => {
+    seedMixed();
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "Active" }));
+    const box = screen.getByRole("checkbox", { name: "Gamma" });
+    box.focus();
+    await user.keyboard(" ");
+    // Committed snapshot: Gamma is completed, so it leaves the Active view…
+    expect(screen.getAllByRole("listitem").map((n) => n.textContent)).toEqual([
+      "Alpha",
+    ]);
+    expect(screen.getByTestId("task-count")).toHaveTextContent("1 task");
+    // …but the store keeps it (toggle, not delete).
+    expect(loadTasks().find((t) => t.id === "c")?.completed).toBe(true);
+    expect(loadTasks()).toHaveLength(3);
+    expect(screen.getByRole("status")).toHaveTextContent(/Completed Gamma/);
+    // The focused checkbox unmounted — focus must not drop to the body.
+    expect(document.activeElement).not.toBe(document.body);
+  });
+
+  it("un-toggling under the Completed filter drops the row from view", async () => {
+    seedMixed();
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "Completed" }));
+    await user.click(screen.getByRole("checkbox", { name: "Beta" }));
+    expect(screen.getByTestId("empty-state")).toBeInTheDocument();
+    expect(screen.getByTestId("task-count")).toHaveTextContent("0 tasks");
+    expect(loadTasks().find((t) => t.id === "b")?.completed).toBe(false);
+    expect(loadTasks()).toHaveLength(3);
+  });
+
+  it("deleting under a filter renders the committed snapshot and keeps focus in view", async () => {
+    seedMixed();
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "Active" }));
+    const btn = screen.getByRole("button", { name: "Delete Gamma" });
+    btn.focus();
+    await user.keyboard("{Enter}");
+    expect(screen.getAllByRole("listitem").map((n) => n.textContent)).toEqual([
+      "Alpha",
+    ]);
+    expect(screen.getByTestId("task-count")).toHaveTextContent("1 task");
+    // Beta is completed and hidden by the filter — it must survive the delete.
+    expect(loadTasks().map((t) => t.id).sort()).toEqual(["a", "b"]);
+    // Focus lands on the surviving IN-VIEW delete control, not the body.
+    expect(document.activeElement).toBe(
+      screen.getByRole("button", { name: "Delete Alpha" }),
+    );
+  });
+
+  it("deleting the last visible task under a filter keeps hidden data intact", async () => {
+    seedMixed();
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "Completed" }));
+    const btn = screen.getByRole("button", { name: "Delete Beta" });
+    btn.focus();
+    await user.keyboard("{Enter}");
+    expect(screen.getByTestId("empty-state")).toBeInTheDocument();
+    expect(screen.getByTestId("task-count")).toHaveTextContent("0 tasks");
+    // The active tasks are hidden, not deleted.
+    expect(loadTasks().map((t) => t.id).sort()).toEqual(["a", "c"]);
+    // No surviving in-view control: focus falls back to the new-task input.
+    expect(document.activeElement).toBe(
+      screen.getByRole("textbox", { name: /new task/i }),
+    );
+  });
+
+  it("an empty filtered view shows a friendly message, not a blank section", () => {
+    saveTasks([{ id: "a", title: "Alpha", completed: false, createdAt: 1 }]);
+    localStorage.setItem("todo-demo:filter", "completed");
+    render(<App />);
+    expect(screen.getByTestId("empty-state")).toBeInTheDocument();
+    expect(screen.getByTestId("task-count")).toHaveTextContent("0 tasks");
+    expect(loadTasks()).toHaveLength(1);
+  });
+
+  it("adding under the Completed filter persists the task without showing it", async () => {
+    seedMixed();
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "Completed" }));
+    await user.type(
+      screen.getByRole("textbox", { name: /new task/i }),
+      "Fresh{Enter}",
+    );
+    // New tasks are active: persisted and announced, but not in this view.
+    expect(loadTasks().map((t) => t.title)).toContain("Fresh");
+    expect(screen.getAllByRole("listitem").map((n) => n.textContent)).toEqual([
+      "Beta",
+    ]);
+    expect(screen.getByTestId("task-count")).toHaveTextContent("1 task");
+    expect(screen.getByRole("status")).toHaveTextContent(/Added Fresh/);
+  });
+
+  it("filter controls carry the theme's opaque focus ring", async () => {
+    const style = document.createElement("style");
+    style.textContent = themeCss;
+    document.head.appendChild(style);
+    try {
+      render(<App />);
+      const user = userEvent.setup();
+      await user.tab(); // Add
+      await user.tab(); // All
+      await user.tab(); // Active
+      const button = screen.getByRole("button", { name: "Active" });
+      expect(button).toHaveFocus();
+      const s = getComputedStyle(button);
+      expect(s.outlineStyle).toBe("solid");
+      expect(s.outlineColor).toBe("rgb(178, 62, 2)");
+    } finally {
+      style.remove();
+    }
+  });
+
+  it("add under a filter announces the VISIBLE count, not the full total", async () => {
+    // Round-1 MINOR-1: spoken and displayed numerics must agree.
+    saveTasks([{ id: "a", title: "Done thing", completed: true, createdAt: 1 }]);
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "Completed" }));
+    await user.type(screen.getByRole("textbox", { name: /new task/i }), "Fresh{Enter}");
+    expect(screen.getByTestId("task-count")).toHaveTextContent("1 task");
+    const spoken = screen.getByRole("status").textContent || "";
+    expect(spoken).toMatch(/Added Fresh/);
+    expect(spoken).toMatch(/1 task shown/);
+    expect(spoken).not.toMatch(/2 tasks/);
+  });
+
+  it("delete under a filter announces the VISIBLE remaining count", async () => {
+    saveTasks([
+      { id: "a", title: "Active one", completed: false, createdAt: 1 },
+      { id: "b", title: "Done one", completed: true, createdAt: 2 },
+    ]);
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "Active" }));
+    await user.click(screen.getByRole("button", { name: "Delete Active one" }));
+    expect(screen.getByTestId("task-count")).toHaveTextContent("0 tasks");
+    const spoken = screen.getByRole("status").textContent || "";
+    expect(spoken).toMatch(/Deleted Active one/);
+    expect(spoken).toMatch(/0 tasks left in view/);
+  });
+
+  it("toggle under a filter announces counts from the VISIBLE set", async () => {
+    saveTasks([
+      { id: "a", title: "Active one", completed: false, createdAt: 1 },
+      { id: "b", title: "Done one", completed: true, createdAt: 2 },
+    ]);
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "Active" }));
+    await user.click(screen.getByRole("checkbox", { name: "Active one" }));
+    // The toggled row leaves the Active view: 0 of 0 shown done.
+    expect(screen.getByRole("status")).toHaveTextContent(/0 of 0 shown done/);
+  });
+
+  it("a filtered-empty view says no matches, not 'nothing here yet'", async () => {
+    // Round-1 MINOR-2: tasks hidden behind the filter are not an empty app.
+    saveTasks([{ id: "a", title: "Active only", completed: false, createdAt: 1 }]);
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "Completed" }));
+    const empty = screen.getByTestId("empty-state");
+    expect(empty.textContent).not.toMatch(/nothing here yet/i);
+    expect(empty.textContent).toMatch(/no completed tasks/i);
+  });
+
+  it("repeated same-title adds under Completed still re-announce", async () => {
+    // Round-2 finding: new tasks are active, so the Completed view's
+    // visible count never changes on add — same-title adds produced
+    // identical live-region text and the second success was silent.
+    // The addition sequence keeps every announcement distinct.
+    saveTasks([{ id: "a", title: "Done thing", completed: true, createdAt: 1 }]);
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "Completed" }));
+    const input = screen.getByRole("textbox", { name: /new task/i });
+    await user.type(input, "Same{Enter}");
+    const first = screen.getByRole("status").textContent;
+    await user.type(input, "Same{Enter}");
+    const second = screen.getByRole("status").textContent;
+    expect(first).toMatch(/Added Same/);
+    expect(second).toMatch(/Added Same/);
+    expect(second).not.toBe(first);
+    expect(screen.getByTestId("task-count")).toHaveTextContent("1 task");
   });
 });
