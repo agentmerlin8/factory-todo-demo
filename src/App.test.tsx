@@ -1,8 +1,18 @@
+/// <reference types="node" />
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import App from "./App";
 import { loadTasks, saveTasks } from "./store";
+
+// The real stylesheet, read from disk and injected only where computed style
+// is asserted: vitest runs with css:false, which stubs CSS imports (?raw and
+// ?inline both come back empty), so a disk read is the only way to test the
+// actual theme without touching the vitest config. Anchored to this file,
+// not the cwd, so it survives runners invoked from elsewhere.
+const themeCss = readFileSync(join(__dirname, "index.css"), "utf8");
 
 beforeEach(() => {
   localStorage.clear();
@@ -336,5 +346,296 @@ describe("TOD-2 — list tasks", () => {
       /nothing here yet/i,
     );
     expect(screen.queryByRole("listitem")).toBeNull();
+  });
+});
+
+describe("TOD-3 — complete / uncomplete", () => {
+  const seedTwo = () =>
+    saveTasks([
+      { id: "a", title: "Write the tests", completed: false, createdAt: 1 },
+      { id: "b", title: "Ship the story", completed: false, createdAt: 2 },
+    ]);
+
+  it("AC1: every task has a checkbox toggle named for its task", () => {
+    seedTwo();
+    render(<App />);
+    const boxes = screen.getAllByRole("checkbox");
+    expect(boxes).toHaveLength(2);
+    expect(
+      screen.getByRole("checkbox", { name: "Ship the story" }),
+    ).not.toBeChecked();
+    expect(
+      screen.getByRole("checkbox", { name: "Write the tests" }),
+    ).not.toBeChecked();
+  });
+
+  it("checkbox toggles the task and persists completed=true", async () => {
+    seedTwo();
+    const user = userEvent.setup();
+    render(<App />);
+    const box = screen.getByRole("checkbox", { name: "Ship the story" });
+    await user.click(box);
+    expect(box).toBeChecked();
+    const stored = loadTasks();
+    expect(stored.find((t) => t.id === "b")?.completed).toBe(true);
+    expect(stored.find((t) => t.id === "a")?.completed).toBe(false);
+    // Toggling never reorders the list (TOD-2 AC1 holds through mutations).
+    expect(
+      screen.getAllByRole("listitem").map((n) => n.textContent),
+    ).toEqual(["Ship the story", "Write the tests"]);
+    expect(screen.getByTestId("task-count")).toHaveTextContent("2 tasks");
+  });
+
+  it("AC4: toggling twice returns to the original state, in view and store", async () => {
+    seedTwo();
+    const original = loadTasks();
+    const user = userEvent.setup();
+    render(<App />);
+    const box = screen.getByRole("checkbox", { name: "Ship the story" });
+    await user.click(box);
+    expect(box).toBeChecked();
+    await user.click(box);
+    expect(box).not.toBeChecked();
+    expect(loadTasks()).toEqual(original);
+    expect(
+      screen.getByRole("checkbox", { name: "Write the tests" }),
+    ).not.toBeChecked();
+  });
+
+  it("AC2: completed titles render strikethrough (and muted), active ones do not", () => {
+    // Computed style from the REAL theme file — vitest css:false means the
+    // stylesheet must be injected here; asserting a class name alone would
+    // pass even if the CSS rule were missing.
+    const style = document.createElement("style");
+    style.textContent = themeCss;
+    document.head.appendChild(style);
+    try {
+      saveTasks([
+        { id: "done", title: "Finished chore", completed: true, createdAt: 2 },
+        { id: "todo", title: "Open chore", completed: false, createdAt: 1 },
+      ]);
+      render(<App />);
+      const doneTitle = screen.getByText("Finished chore");
+      const todoTitle = screen.getByText("Open chore");
+      const doneStyle = getComputedStyle(doneTitle);
+      const todoStyle = getComputedStyle(todoTitle);
+      expect(doneStyle.textDecorationLine).toBe("line-through");
+      expect(todoStyle.textDecorationLine).toBe("none");
+      // Contrast-safe muted ink: --ink-soft (#6f6353) on --surface-raised
+      // (#fffefb) is 5.8:1 in light, 6.5:1 in dark — WCAG AA.
+      expect(doneStyle.color).toBe("rgb(111, 99, 83)");
+      expect(todoStyle.color).toBe("rgb(43, 33, 24)");
+    } finally {
+      style.remove();
+    }
+  });
+
+  it("strikethrough appears on toggle and clears on untoggle", async () => {
+    const style = document.createElement("style");
+    style.textContent = themeCss;
+    document.head.appendChild(style);
+    try {
+      seedTwo();
+      const user = userEvent.setup();
+      render(<App />);
+      const box = screen.getByRole("checkbox", { name: "Ship the story" });
+      expect(getComputedStyle(screen.getByText("Ship the story")).textDecorationLine).toBe("none");
+      await user.click(box);
+      expect(getComputedStyle(screen.getByText("Ship the story")).textDecorationLine).toBe("line-through");
+      await user.click(box);
+      expect(getComputedStyle(screen.getByText("Ship the story")).textDecorationLine).toBe("none");
+    } finally {
+      style.remove();
+    }
+  });
+
+  it("AC3: toggle state survives reload (fresh mount reads the store)", async () => {
+    seedTwo();
+    const user = userEvent.setup();
+    const { unmount } = render(<App />);
+    await user.click(screen.getByRole("checkbox", { name: "Ship the story" }));
+    expect(loadTasks().find((t) => t.id === "b")?.completed).toBe(true);
+
+    // Simulate a page reload: tear down, mount fresh from the same store.
+    unmount();
+    render(<App />);
+    expect(
+      screen.getByRole("checkbox", { name: "Ship the story" }),
+    ).toBeChecked();
+    expect(
+      screen.getByRole("checkbox", { name: "Write the tests" }),
+    ).not.toBeChecked();
+  });
+
+  it("toggle state changes are announced in the live region", async () => {
+    seedTwo();
+    const user = userEvent.setup();
+    render(<App />);
+    const box = screen.getByRole("checkbox", { name: "Ship the story" });
+    await user.click(box);
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Completed Ship the story.",
+    );
+    await user.click(box);
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Marked Ship the story as active.",
+    );
+  });
+
+  it("AC5: storage throws on toggle -> revert + accessible error, no silent unsaved state", async () => {
+    seedTwo();
+    const user = userEvent.setup();
+    render(<App />);
+    const box = screen.getByRole("checkbox", { name: "Ship the story" });
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("Quota exceeded", "QuotaExceededError");
+    });
+    await user.click(box);
+    // Controlled checkbox snaps back to the persisted state…
+    expect(box).not.toBeChecked();
+    // …and the failure is announced assertively, not swallowed.
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      /couldn’t be saved/i,
+    );
+    expect(loadTasks().find((t) => t.id === "b")?.completed).toBe(false);
+    // No success announcement for a write that never happened.
+    expect(screen.getByRole("status")).toHaveTextContent("");
+  });
+
+  it("AC5: a failed un-toggle of a completed task also reverts", async () => {
+    saveTasks([
+      { id: "done", title: "Already done", completed: true, createdAt: 1 },
+    ]);
+    const user = userEvent.setup();
+    render(<App />);
+    const box = screen.getByRole("checkbox", { name: "Already done" });
+    expect(box).toBeChecked();
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("Quota exceeded", "QuotaExceededError");
+    });
+    await user.click(box);
+    expect(box).toBeChecked();
+    expect(screen.getByRole("alert")).toHaveTextContent(/couldn’t be saved/i);
+    expect(loadTasks()[0].completed).toBe(true);
+  });
+
+  it("toggle failure clears on a later successful add", async () => {
+    seedTwo();
+    const user = userEvent.setup();
+    render(<App />);
+    const spy = vi
+      .spyOn(Storage.prototype, "setItem")
+      .mockImplementation(() => {
+        throw new DOMException("Quota exceeded", "QuotaExceededError");
+      });
+    await user.click(screen.getByRole("checkbox", { name: "Ship the story" }));
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+    spy.mockRestore();
+    await user.type(
+      screen.getByRole("textbox", { name: /new task/i }),
+      "Recovery{Enter}",
+    );
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByRole("status")).toHaveTextContent("Added Recovery.");
+  });
+
+  it("a successful toggle clears a prior storage-failure alert", async () => {
+    // Symmetric coverage (round-1 MINOR-1): deleting setStorageFailed(false)
+    // from handleToggle's success path must turn this test red.
+    seedTwo();
+    const user = userEvent.setup();
+    render(<App />);
+    const spy = vi
+      .spyOn(Storage.prototype, "setItem")
+      .mockImplementation(() => {
+        throw new DOMException("Quota exceeded", "QuotaExceededError");
+      });
+    await user.click(screen.getByRole("checkbox", { name: "Ship the story" }));
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+    spy.mockRestore();
+    await user.click(screen.getByRole("checkbox", { name: "Ship the story" }));
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByRole("checkbox", { name: "Ship the story" })).toBeChecked();
+  });
+
+  it("completing two same-title tasks announces both (count distinguishes)", async () => {
+    // Round-2 finding: direction-specific wording alone produced identical
+    // live-region text for two different tasks with the same title — the
+    // second success never re-announced. The completed count distinguishes.
+    saveTasks([
+      { id: "a", title: "Same name", completed: false, createdAt: 1 },
+      { id: "b", title: "Same name", completed: false, createdAt: 2 },
+    ]);
+    const user = userEvent.setup();
+    render(<App />);
+    const boxes = screen.getAllByRole("checkbox", { name: "Same name" });
+    await user.click(boxes[0]);
+    const first = screen.getByRole("status").textContent;
+    await user.click(boxes[1]);
+    const second = screen.getByRole("status").textContent;
+    expect(first).toMatch(/Completed Same name/);
+    expect(second).not.toBe(first);
+    expect(second).toMatch(/2 of 2 done/);
+  });
+
+  it("a toggle storage failure is not masked by a pending blank-input rejection", async () => {
+    // Round-2 finding: the shared alert prioritizes `rejected`; without
+    // clearing it in the toggle failure path the user saw "Give the task a
+    // name" instead of the storage error.
+    saveTasks([{ id: "a", title: "Task", completed: false, createdAt: 1 }]);
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: /^add$/i }));
+    expect(screen.getByRole("alert")).toHaveTextContent(/give the task a name/i);
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("Quota exceeded", "QuotaExceededError");
+    });
+    await user.click(screen.getByRole("checkbox", { name: "Task" }));
+    expect(screen.getByRole("alert")).toHaveTextContent(/couldn’t be saved/i);
+  });
+
+  it("a storage READ failure during toggle surfaces the alert, not silence", async () => {
+    // Round-2 finding: loadTasks swallowed the read error into "unknown id"
+    // and the UI stayed silent. Mutation reads now propagate access errors.
+    saveTasks([{ id: "a", title: "Task", completed: false, createdAt: 1 }]);
+    const user = userEvent.setup();
+    render(<App />);
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new DOMException("Storage disabled", "SecurityError");
+    });
+    await user.click(screen.getByRole("checkbox", { name: "Task" }));
+    expect(screen.getByRole("alert")).toHaveTextContent(/couldn’t be saved/i);
+    expect(screen.getByRole("checkbox", { name: "Task" })).not.toBeChecked();
+  });
+
+  it("a POST-WRITE read failure keeps the committed list visible (round-3)", async () => {
+    // The write succeeds; only the readback fails. Rendering from the
+    // committed snapshot (not a fresh read) keeps tasks, counts and the
+    // announcement truthful instead of wiping the list to "0 of 0 done".
+    saveTasks([
+      { id: "a", title: "Alpha", completed: false, createdAt: 1 },
+      { id: "b", title: "Beta", completed: false, createdAt: 2 },
+    ]);
+    const user = userEvent.setup();
+    render(<App />);
+    const realGet = Storage.prototype.getItem;
+    let gets = 0;
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(function (
+      this: Storage, key: string,
+    ) {
+      if (key === "todo-demo:tasks") {
+        gets += 1;
+        if (gets >= 3) {
+          throw new DOMException("Storage disabled", "SecurityError");
+        }
+      }
+      return realGet.call(this, key);
+    });
+    await user.click(screen.getByRole("checkbox", { name: "Beta" }));
+    expect(screen.getAllByRole("listitem")).toHaveLength(2);
+    expect(screen.getByRole("checkbox", { name: "Beta" })).toBeChecked();
+    expect(screen.getByTestId("task-count")).toHaveTextContent("2 tasks");
+    expect(screen.getByRole("status")).toHaveTextContent(/1 of 2 done/);
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 });

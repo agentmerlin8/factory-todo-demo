@@ -49,23 +49,39 @@ export function isTask(value: unknown): value is Task {
   );
 }
 
+/**
+ * Strict read for MUTATION paths: storage-access errors propagate so the
+ * caller can surface them (round-2 finding: a read failure during toggle
+ * was swallowed into "unknown id" and the UI stayed silent). Corrupt JSON
+ * and malformed entries are still tolerated — that is data validation,
+ * not an access failure.
+ */
+function readTasksStrict(): Task[] {
+  const raw = localStorage.getItem(STORAGE_KEY); // throws on access failure
+  if (!raw) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(parsed)) return [];
+  const seen = new Set<string>();
+  const tasks: Task[] = [];
+  for (const entry of parsed) {
+    if (!isTask(entry) || seen.has(entry.id)) continue;
+    seen.add(entry.id);
+    tasks.push(entry);
+  }
+  return tasks;
+}
+
 export function loadTasks(): Task[] {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    // Drop malformed entries instead of crashing the mount. Dedupe by id so a
-    // corrupt store cannot produce duplicate React keys.
-    const seen = new Set<string>();
-    const tasks: Task[] = [];
-    for (const entry of parsed) {
-      if (!isTask(entry) || seen.has(entry.id)) continue;
-      seen.add(entry.id);
-      tasks.push(entry);
-    }
-    return tasks;
+    return readTasksStrict();
   } catch {
+    // Tolerant load for initial rendering: an unreadable store renders the
+    // empty state instead of crashing the mount (TOD-2 AC5).
     return [];
   }
 }
@@ -154,4 +170,41 @@ export function addTask(title: string): Task | null {
   // and its limit.
   appendTasks([task]);
   return task;
+}
+
+/**
+ * TOD-3 — flip one task's `completed` flag. Same merge discipline as
+ * appendTasks: re-read immediately before the write and union by id, so a
+ * task another tab committed is never dropped. Our toggle is applied to
+ * the FRESH copy (last-writer-wins for the flag itself — localStorage has
+ * no compare-and-swap; the window is narrowed, not eliminated). Returns
+ * the updated task, or null when the id is unknown (no write, no
+ * notification). A storage failure propagates BEFORE emit and before any
+ * caller can render the new state — nothing unsaved is ever announced
+ * (TOD-3 AC5).
+ */
+export interface ToggleResult {
+  task: Task;
+  /** The exact list committed by this write. Callers render from THIS
+   * snapshot — a post-write readback is a fresh fallible I/O that can fail
+   * after a successful save and wipe the visible list (round-3 finding). */
+  tasks: Task[];
+}
+
+export function toggleTask(id: string): ToggleResult | null {
+  const current = readTasksStrict();
+  if (!current.some((t) => t.id === id)) return null;
+  // Re-read + merge immediately before setItem (see appendTasks). A plain
+  // array overwrite here would drop a concurrent tab's committed task —
+  // mutation-proven in the round-1 review probe.
+  const fresh = readTasksStrict();
+  const byId = new Map(fresh.map((t) => [t.id, t]));
+  const base = byId.get(id);
+  if (!base) return null; // removed by another tab between reads
+  const toggled: Task = { ...base, completed: !base.completed };
+  byId.set(id, toggled);
+  const committed = [...byId.values()];
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(committed));
+  emit();
+  return { task: toggled, tasks: committed };
 }
