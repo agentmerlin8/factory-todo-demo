@@ -29,6 +29,7 @@ describe("TOD-1 — add a task", () => {
 
     expect(screen.getByRole("listitem")).toHaveTextContent("Ship the demo");
     expect(loadTasks().map((t) => t.title)).toEqual(["Ship the demo"]);
+    expect(input).toHaveValue(""); // review nit: assert input clears after submit
   });
 
   it("whitespace-only input is rejected and the input keeps focus", async () => {
