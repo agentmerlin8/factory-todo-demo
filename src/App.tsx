@@ -100,7 +100,15 @@ export default function App() {
   function handleDelete(id: string) {
     try {
       const result = deleteTask(id);
-      if (!result) return;
+      if (!result) {
+        // Another tab already deleted this task. Drop the obsolete row from
+        // local state — no storage read/write, no deletion announcement
+        // (nothing was deleted HERE). Round-2 finding: the early return
+        // left a stale row and count, even for the last task.
+        setTasks((prev) => prev.filter((t) => t.id !== id));
+        inputRef.current?.focus();
+        return;
+      }
       // Render from the COMMITTED snapshot — no post-write readback, same
       // contract as toggle (a fallible read after a successful save can
       // wipe the visible list).
@@ -117,6 +125,15 @@ export default function App() {
       setAnnouncement(
         `Deleted ${result.task.title}. ${next.length} ${next.length === 1 ? "task" : "tasks"} left.`,
       );
+      // The deleted row's button may have owned keyboard focus; removing
+      // it drops focus to the body. Move to a surviving delete control, or
+      // the new-task input as the stable fallback (round-2 finding).
+      const survivor = next.find((t) => t.id !== id);
+      if (survivor) {
+        document.getElementById(`task-delete-${survivor.id}`)?.focus();
+      } else {
+        inputRef.current?.focus();
+      }
     } catch {
       // AC5: `tasks` is untouched, so the row stays visible while the store
       // still holds it — no silent loss. Shared assertive alert; clear the
@@ -215,6 +232,7 @@ export default function App() {
                     stays the task title alone. type="button" — never submits
                     the add form. */}
                 <button
+                  id={`task-delete-${task.id}`}
                   type="button"
                   className="task-delete"
                   aria-label={`Delete ${task.title}`}

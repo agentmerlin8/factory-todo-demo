@@ -905,4 +905,60 @@ describe("TOD-4 — delete a task", () => {
     expect(screen.queryByRole("alert")).toBeNull();
     expect(screen.getByRole("status")).toHaveTextContent(/Completed Task/);
   });
+
+  it("a delete of an already-removed task drops the stale row silently", async () => {
+    // Round-2 finding: another tab deleted the task after mount; the
+    // null-return early exit left the obsolete row and count visible.
+    saveTasks([
+      { id: "a", title: "Alpha", completed: false, createdAt: 1 },
+      { id: "b", title: "Beta", completed: false, createdAt: 2 },
+    ]);
+    const user = userEvent.setup();
+    render(<App />);
+    saveTasks([{ id: "a", title: "Alpha", completed: false, createdAt: 1 }]);
+    const writes = vi.spyOn(Storage.prototype, "setItem");
+    await user.click(screen.getByRole("button", { name: "Delete Beta" }));
+    expect(screen.getAllByRole("listitem")).toHaveLength(1);
+    expect(screen.getByTestId("task-count")).toHaveTextContent("1 task");
+    expect(writes).not.toHaveBeenCalled();
+    expect(screen.getByRole("status")).toHaveTextContent("");
+  });
+
+  it("a stale delete of the LAST task falls through to the empty state", async () => {
+    saveTasks([{ id: "a", title: "Alpha", completed: false, createdAt: 1 }]);
+    const user = userEvent.setup();
+    render(<App />);
+    saveTasks([]);
+    await user.click(screen.getByRole("button", { name: "Delete Alpha" }));
+    expect(screen.getByTestId("empty-state")).toBeInTheDocument();
+    expect(screen.getByTestId("task-count")).toHaveTextContent("0 tasks");
+  });
+
+  it("keyboard delete moves focus to a surviving control, not the body", async () => {
+    // Round-2 finding: removing the focused button dropped focus to the
+    // body — keyboard/screen-reader users lost their interaction context.
+    saveTasks([
+      { id: "a", title: "Alpha", completed: false, createdAt: 1 },
+      { id: "b", title: "Beta", completed: false, createdAt: 2 },
+    ]);
+    const user = userEvent.setup();
+    render(<App />);
+    const btn = screen.getByRole("button", { name: "Delete Beta" });
+    btn.focus();
+    await user.keyboard("{Enter}");
+    expect(screen.getAllByRole("listitem")).toHaveLength(1);
+    expect(document.activeElement).not.toBe(document.body);
+  });
+
+  it("deleting the last task moves focus to the new-task input", async () => {
+    saveTasks([{ id: "a", title: "Alpha", completed: false, createdAt: 1 }]);
+    const user = userEvent.setup();
+    render(<App />);
+    const btn = screen.getByRole("button", { name: "Delete Alpha" });
+    btn.focus();
+    await user.keyboard("{Enter}");
+    expect(document.activeElement).toBe(
+      screen.getByRole("textbox", { name: /new task/i }),
+    );
+  });
 });
