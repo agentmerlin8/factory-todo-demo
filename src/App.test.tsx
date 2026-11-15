@@ -1359,4 +1359,24 @@ describe("TOD-5 — filter view", () => {
     expect(empty.textContent).not.toMatch(/nothing here yet/i);
     expect(empty.textContent).toMatch(/no completed tasks/i);
   });
+
+  it("repeated same-title adds under Completed still re-announce", async () => {
+    // Round-2 finding: new tasks are active, so the Completed view's
+    // visible count never changes on add — same-title adds produced
+    // identical live-region text and the second success was silent.
+    // The addition sequence keeps every announcement distinct.
+    saveTasks([{ id: "a", title: "Done thing", completed: true, createdAt: 1 }]);
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "Completed" }));
+    const input = screen.getByRole("textbox", { name: /new task/i });
+    await user.type(input, "Same{Enter}");
+    const first = screen.getByRole("status").textContent;
+    await user.type(input, "Same{Enter}");
+    const second = screen.getByRole("status").textContent;
+    expect(first).toMatch(/Added Same/);
+    expect(second).toMatch(/Added Same/);
+    expect(second).not.toBe(first);
+    expect(screen.getByTestId("task-count")).toHaveTextContent("1 task");
+  });
 });

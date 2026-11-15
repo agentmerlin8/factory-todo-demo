@@ -40,6 +40,12 @@ export default function App() {
   // be told, or the action is silent (round-5 finding).
   const [announcement, setAnnouncement] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
+  // Monotonic addition sequence: under a filter that HIDES new tasks
+  // (Completed), the visible count never changes on add, so same-title
+  // adds would produce identical live-region text and the second success
+  // would never re-announce (round-2 finding). The sequence guarantees
+  // distinct text per add regardless of view.
+  const addSeq = useRef(0);
   // TOD-5 AC2: the visible list is the filtered subset; the count reflects
   // it. `tasks` stays the FULL committed list so filtering never touches
   // task data (AC4) and hidden tasks survive mutations.
@@ -68,9 +74,12 @@ export default function App() {
       // re-trigger an announcement, so two tasks with the same title would
       // otherwise announce only once. Under a filter the spoken count must
       // match the VISIBLE count, not the full total (round-1 MINOR-1).
+      // The addition sequence keeps text distinct even when the visible
+      // count cannot change (Completed view hides new active tasks).
       const shown = filterTasks(next, filter).length;
+      addSeq.current += 1;
       setAnnouncement(
-        `Added ${task.title}. ${shown} ${shown === 1 ? "task" : "tasks"} shown.`,
+        `Added ${task.title}. ${shown} ${shown === 1 ? "task" : "tasks"} shown. Addition ${addSeq.current}.`,
       );
       inputRef.current?.focus();
     } catch {
