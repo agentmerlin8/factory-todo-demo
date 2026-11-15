@@ -316,7 +316,14 @@ describe("TOD-2 — list tasks", () => {
   });
 
   it("malformed array entries render the empty state instead of crashing", () => {
-    localStorage.setItem("todo-demo:tasks", "[null, {}, 42, \"str\"]");
+    // Partial objects (no leading null): a missing per-entry guard would let
+    // these reach the render as list items with undefined titles. A leading
+    // null would throw into loadTasks' outer catch and mask the gap — this
+    // payload fails when the isTask guard is removed (mutation-verified).
+    localStorage.setItem(
+      "todo-demo:tasks",
+      '[{"id":"x"},{"id":"y","title":"no completed flag"}]',
+    );
     render(<App />);
     expect(screen.getByTestId("empty-state")).toHaveTextContent(
       /nothing here yet/i,
