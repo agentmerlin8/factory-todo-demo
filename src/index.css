@@ -27,7 +27,12 @@
   --danger: #c22f2f;
   --danger-wash: rgba(194, 47, 47, 0.08);
 
+  /* Decorative glow only — translucent, never used as a focus INDICATOR. */
   --focus-ring: rgba(217, 79, 4, 0.35);
+  /* Opaque, >=3:1 against every surface: the actual keyboard focus indicator. */
+  --focus-indicator: #b23e02;
+  /* Selection background must carry >=4.5:1 against --surface text. */
+  --selection-bg: #b23e02;
   --shadow-card:
     0 1px 2px rgba(43, 33, 24, 0.06), 0 12px 32px -12px rgba(43, 33, 24, 0.18);
   --shadow-key:
@@ -71,6 +76,8 @@
     --danger-wash: rgba(255, 107, 94, 0.12);
 
     --focus-ring: rgba(255, 122, 47, 0.4);
+    --focus-indicator: #ff9254;
+    --selection-bg: #ff9254;
     --shadow-card:
       0 1px 2px rgba(0, 0, 0, 0.4), 0 14px 36px -12px rgba(0, 0, 0, 0.6);
     --shadow-key:
@@ -143,7 +150,7 @@ body::before {
 }
 
 ::selection {
-  background: var(--persimmon);
+  background: var(--selection-bg);
   color: var(--surface);
 }
 
@@ -226,6 +233,12 @@ h1::after {
     0 0 0 4px var(--focus-ring);
 }
 
+.add-input:focus-visible {
+  outline: 2px solid var(--focus-indicator);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
 .add-row--rejected {
   border-color: var(--danger);
   animation: shake 0.3s ease-in-out;
@@ -273,12 +286,6 @@ h1::after {
     filter 0.12s ease;
 }
 
-@media (prefers-color-scheme: dark) {
-  .add-button {
-    color: #241205;
-  }
-}
-
 .add-button:hover {
   filter: brightness(1.07);
   transform: translateY(-1px);
@@ -290,7 +297,9 @@ h1::after {
 }
 
 .add-button:focus-visible {
-  outline: 3px solid var(--focus-ring);
+  /* Opaque >=3:1 indicator; the row glow is decorative and does not identify
+     which control has focus, so the button carries its own ring. */
+  outline: 3px solid var(--focus-indicator);
   outline-offset: 2px;
 }
 
