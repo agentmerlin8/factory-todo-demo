@@ -107,3 +107,28 @@ describe("TOD-1 — add a task", () => {
     expect(screen.getByRole("listitem")).toHaveTextContent("Persist me");
   });
 });
+
+describe("malformed storage does not break mount (round-3 regression)", () => {
+  it("renders the empty state when stored entries are null", () => {
+    localStorage.setItem("todo-demo:tasks", "[null]");
+    render(<App />);
+    expect(screen.getByRole("heading", { name: /to-do/i })).toBeInTheDocument();
+    expect(screen.queryByRole("listitem")).toBeNull();
+  });
+
+  it("renders when entries are partial objects", () => {
+    localStorage.setItem("todo-demo:tasks", JSON.stringify([{ id: "x" }]));
+    render(<App />);
+    expect(screen.getByRole("heading", { name: /to-do/i })).toBeInTheDocument();
+    expect(screen.queryByRole("listitem")).toBeNull();
+  });
+
+  it("still renders the valid entries alongside malformed ones", () => {
+    localStorage.setItem(
+      "todo-demo:tasks",
+      JSON.stringify([null, { id: "ok", title: "Valid", completed: false, createdAt: 1 }]),
+    );
+    render(<App />);
+    expect(screen.getByRole("listitem")).toHaveTextContent("Valid");
+  });
+});

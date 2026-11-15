@@ -30,12 +30,41 @@ function emit(): void {
   for (const fn of listeners) fn();
 }
 
+/**
+ * Runtime guard for one stored entry. Storage is an UNTRUSTED boundary: the
+ * JSON may be written by an older version, another tab, or a user with
+ * devtools. `Array.isArray` alone lets `[null]` or `[{}]` reach the render
+ * and throw during mount, so every field is validated here, once.
+ */
+export function isTask(value: unknown): value is Task {
+  if (typeof value !== "object" || value === null) return false;
+  const t = value as Record<string, unknown>;
+  return (
+    typeof t.id === "string" &&
+    t.id.length > 0 &&
+    typeof t.title === "string" &&
+    typeof t.completed === "boolean" &&
+    typeof t.createdAt === "number" &&
+    Number.isFinite(t.createdAt)
+  );
+}
+
 export function loadTasks(): Task[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? (parsed as Task[]) : [];
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    // Drop malformed entries instead of crashing the mount. Dedupe by id so a
+    // corrupt store cannot produce duplicate React keys.
+    const seen = new Set<string>();
+    const tasks: Task[] = [];
+    for (const entry of parsed) {
+      if (!isTask(entry) || seen.has(entry.id)) continue;
+      seen.add(entry.id);
+      tasks.push(entry);
+    }
+    return tasks;
   } catch {
     return [];
   }

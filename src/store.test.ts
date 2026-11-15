@@ -105,3 +105,54 @@ describe("addTask (TOD-1)", () => {
     expect(calls).toBe(1);
   });
 });
+describe("storage boundary validates entries (round-3 regression)", () => {
+  it("drops null entries instead of crashing the render", () => {
+    localStorage.setItem("todo-demo:tasks", "[null]");
+    expect(loadTasks()).toEqual([]);
+  });
+
+  it("drops entries missing required fields", () => {
+    localStorage.setItem(
+      "todo-demo:tasks",
+      JSON.stringify([{ id: "x" }, { title: "no id" }, 42, "str", []]),
+    );
+    expect(loadTasks()).toEqual([]);
+  });
+
+  it("drops entries with wrong field types", () => {
+    localStorage.setItem(
+      "todo-demo:tasks",
+      JSON.stringify([
+        { id: 1, title: "a", completed: false, createdAt: 1 },
+        { id: "b", title: null, completed: false, createdAt: 1 },
+        { id: "c", title: "c", completed: "no", createdAt: 1 },
+        { id: "d", title: "d", completed: false, createdAt: "1" },
+      ]),
+    );
+    expect(loadTasks()).toEqual([]);
+  });
+
+  it("keeps valid entries and drops only the malformed ones", () => {
+    const good = { id: "ok", title: "keep", completed: false, createdAt: 5 };
+    localStorage.setItem(
+      "todo-demo:tasks",
+      JSON.stringify([null, good, { id: "bad" }]),
+    );
+    expect(loadTasks()).toEqual([good]);
+  });
+
+  it("dedupes by id so corrupt stores cannot produce duplicate keys", () => {
+    const a = { id: "dup", title: "first", completed: false, createdAt: 1 };
+    const b = { id: "dup", title: "second", completed: true, createdAt: 2 };
+    localStorage.setItem("todo-demo:tasks", JSON.stringify([a, b]));
+    expect(loadTasks()).toEqual([a]);
+  });
+
+  it("rejects non-finite createdAt", () => {
+    localStorage.setItem(
+      "todo-demo:tasks",
+      '[{"id":"x","title":"t","completed":false,"createdAt":null}]',
+    );
+    expect(loadTasks()).toEqual([]);
+  });
+});

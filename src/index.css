@@ -16,6 +16,11 @@
   --persimmon: #d94f04;
   --persimmon-deep: #b23e02;
   --persimmon-wash: rgba(217, 79, 4, 0.09);
+  /* Button fill/label pair: audited for WCAG AA across gradient stops AND
+     hover/active brightness. Do not lighten without re-running the gate. */
+  --btn-fill-from: #b23e02;
+  --btn-fill-to: #8a2f02;
+  --btn-label: #fff8f0;
   --marigold: #f2a007;
   --leaf: #1a7f4e;
   --sky: #1f5eff;
@@ -55,6 +60,10 @@
     --persimmon: #ff7a2f;
     --persimmon-deep: #ff9254;
     --persimmon-wash: rgba(255, 122, 47, 0.12);
+    /* Bright orange fill needs a DARK label; near-white on it is ~2:1. */
+    --btn-fill-from: #ff7a2f;
+    --btn-fill-to: #ff9254;
+    --btn-label: #2b1608;
     --marigold: #ffb63d;
     --leaf: #4cc38a;
     --sky: #6f9aff;
@@ -249,11 +258,11 @@ h1::after {
   padding: 0.65rem 1.4rem;
   font: inherit;
   font-weight: 650;
-  color: #fff8f0;
+  color: var(--btn-label);
   background: linear-gradient(
     160deg,
-    var(--persimmon) 0%,
-    var(--persimmon-deep) 100%
+    var(--btn-fill-from) 0%,
+    var(--btn-fill-to) 100%
   );
   border: 0;
   border-radius: 10px;
