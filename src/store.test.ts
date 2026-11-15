@@ -8,7 +8,9 @@ import {
   loadFilter,
   saveFilter,
   newId,
+  sortNewestFirst,
   subscribe,
+  type Task,
 } from "./store";
 
 beforeEach(() => {
@@ -259,5 +261,35 @@ describe("concurrent writers (round-8 regression)", () => {
     addTask("C");
     const ids = loadTasks().map((t) => t.id);
     expect(new Set(ids).size).toBe(ids.length);
+  });
+});
+
+describe("sortNewestFirst (TOD-2)", () => {
+  const t = (id: string, createdAt: number): Task => ({
+    id,
+    title: id,
+    completed: false,
+    createdAt,
+  });
+
+  it("returns tasks newest-first (createdAt descending)", () => {
+    const sorted = sortNewestFirst([t("old", 1), t("new", 3), t("mid", 2)]);
+    expect(sorted.map((x) => x.id)).toEqual(["new", "mid", "old"]);
+  });
+
+  it("is stable for equal timestamps (keeps stored order)", () => {
+    const sorted = sortNewestFirst([t("a", 5), t("b", 5), t("c", 5)]);
+    expect(sorted.map((x) => x.id)).toEqual(["a", "b", "c"]);
+  });
+
+  it("is pure: does not mutate the input, returns a new array", () => {
+    const input = [t("old", 1), t("new", 2)];
+    const sorted = sortNewestFirst(input);
+    expect(input.map((x) => x.id)).toEqual(["old", "new"]);
+    expect(sorted).not.toBe(input);
+  });
+
+  it("handles an empty list", () => {
+    expect(sortNewestFirst([])).toEqual([]);
   });
 });

@@ -76,6 +76,16 @@ export function saveTasks(tasks: Task[]): void {
 }
 
 /**
+ * TOD-2 — newest-first ordering. Pure: returns a new array, never mutates
+ * the input (loadTasks hands out fresh arrays, but callers may hold their
+ * own). Array.prototype.sort is stable (ES2019+), so tasks sharing a
+ * createdAt keep their stored order — no secondary tiebreaker needed.
+ */
+export function sortNewestFirst(tasks: Task[]): Task[] {
+  return [...tasks].sort((a, b) => b.createdAt - a.createdAt);
+}
+
+/**
  * Append records with the read and the write in ONE synchronous step.
  *
  * A caller that reads, does work, then writes always has a window where

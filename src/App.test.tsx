@@ -87,8 +87,12 @@ describe("TOD-1 — add a task", () => {
 
     const items = screen.getAllByRole("listitem");
     expect(items).toHaveLength(2);
-    expect(items[0]).toHaveTextContent("First");
-    expect(items[1]).toHaveTextContent("Second");
+    // TOD-2 owns render order (newest-first); this test only asserts that
+    // both adds accumulate. Strict ordering is covered by the TOD-2 tests
+    // with fixed timestamps, so same-millisecond adds cannot flake here.
+    const titles = items.map((n) => n.textContent);
+    expect(titles.some((t) => t?.includes("First"))).toBe(true);
+    expect(titles.some((t) => t?.includes("Second"))).toBe(true);
     expect(input).toHaveFocus();
   });
 
@@ -232,5 +236,91 @@ describe("cross-tab consistency (round-7 regression)", () => {
     ]);
     await user.type(input, "C{Enter}");
     expect(screen.getByRole("status")).toHaveTextContent("3 tasks");
+  });
+});
+
+describe("TOD-2 — list tasks", () => {
+  it("renders tasks newest-first (createdAt descending)", () => {
+    // Seed out of order: the view must sort, not trust storage order.
+    saveTasks([
+      { id: "old", title: "Oldest task", completed: false, createdAt: 1 },
+      { id: "new", title: "Newest task", completed: false, createdAt: 3 },
+      { id: "mid", title: "Middle task", completed: false, createdAt: 2 },
+    ]);
+    render(<App />);
+    const titles = screen.getAllByRole("listitem").map((n) => n.textContent);
+    expect(titles).toEqual(["Newest task", "Middle task", "Oldest task"]);
+  });
+
+  it("shows a friendly empty-state message when there are no tasks", () => {
+    render(<App />);
+    expect(screen.getByTestId("empty-state")).toHaveTextContent(
+      /nothing here yet/i,
+    );
+    expect(screen.getByTestId("task-count")).toHaveTextContent("0 tasks");
+    expect(screen.queryByRole("list")).toBeNull();
+  });
+
+  it("count matches the task total and updates live on add", async () => {
+    saveTasks([
+      { id: "a", title: "A", completed: false, createdAt: 1 },
+      { id: "b", title: "B", completed: false, createdAt: 2 },
+      { id: "c", title: "C", completed: true, createdAt: 3 },
+    ]);
+    render(<App />);
+    // Count reflects ALL tasks, completed included (filtering is TOD-5).
+    expect(screen.getByTestId("task-count")).toHaveTextContent("3 tasks");
+    const user = userEvent.setup();
+    await user.type(
+      screen.getByRole("textbox", { name: /new task/i }),
+      "One more{Enter}",
+    );
+    expect(screen.getByTestId("task-count")).toHaveTextContent("4 tasks");
+    expect(screen.getAllByRole("listitem")).toHaveLength(4);
+  });
+
+  it("uses singular wording for exactly one task", () => {
+    saveTasks([{ id: "a", title: "Solo", completed: false, createdAt: 1 }]);
+    render(<App />);
+    expect(screen.getByTestId("task-count").textContent).toBe("1 task");
+  });
+
+  it("reload restores the list, newest-first, from the store TOD-1 writes", async () => {
+    // Deterministic clock: each add gets a strictly later createdAt, so the
+    // newest-first assertion cannot flake on same-millisecond adds.
+    let now = 1_000;
+    vi.spyOn(Date, "now").mockImplementation(() => (now += 1_000));
+    const user = userEvent.setup();
+    const { unmount } = render(<App />);
+    const input = screen.getByRole("textbox", { name: /new task/i });
+    await user.type(input, "First{Enter}");
+    await user.type(input, "Second{Enter}");
+    expect(loadTasks().map((t) => t.title)).toEqual(["First", "Second"]);
+
+    // Simulate a page reload: tear down, mount fresh from the same store.
+    unmount();
+    render(<App />);
+    const titles = screen.getAllByRole("listitem").map((n) => n.textContent);
+    expect(titles).toEqual(["Second", "First"]);
+    expect(screen.getByTestId("task-count")).toHaveTextContent("2 tasks");
+  });
+
+  it("corrupt stored JSON renders the empty state instead of crashing", () => {
+    localStorage.setItem("todo-demo:tasks", "{definitely not json");
+    render(<App />);
+    expect(screen.getByTestId("empty-state")).toHaveTextContent(
+      /nothing here yet/i,
+    );
+    expect(screen.getByTestId("task-count")).toHaveTextContent("0 tasks");
+    expect(screen.queryByRole("listitem")).toBeNull();
+  });
+
+  it("malformed array entries render the empty state instead of crashing", () => {
+    localStorage.setItem("todo-demo:tasks", "[null, {}, 42, \"str\"]");
+    render(<App />);
+    expect(screen.getByTestId("empty-state")).toHaveTextContent(
+      /nothing here yet/i,
+    );
+    expect(screen.queryByRole("listitem")).toBeNull();
   });
 });
