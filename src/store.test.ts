@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import {
   addTask,
   appendTasks,
+  isTask,
   loadTasks,
   saveTasks,
   loadFilter,
@@ -149,12 +150,52 @@ describe("storage boundary validates entries (round-3 regression)", () => {
     expect(loadTasks()).toEqual([a]);
   });
 
-  it("rejects non-finite createdAt", () => {
+  it("rejects a non-number createdAt (type guard)", () => {
     localStorage.setItem(
       "todo-demo:tasks",
       '[{"id":"x","title":"t","completed":false,"createdAt":null}]',
     );
     expect(loadTasks()).toEqual([]);
+  });
+
+  it("rejects non-finite NUMBERS (exercises Number.isFinite, not typeof)", () => {
+    // null/undefined/"1" are caught by `typeof === "number"` and never reach
+    // Number.isFinite. Only a value that IS a number but is not finite
+    // exercises that guard: Infinity, -Infinity, NaN. JSON cannot carry
+    // NaN/Infinity literals, so build the payload with a replacer-free splice.
+    for (const bad of ["Infinity", "-Infinity", "NaN"]) {
+      localStorage.setItem(
+        "todo-demo:tasks",
+        `[{"id":"x","title":"t","completed":false,"createdAt":${bad}}]`,
+      );
+      // Bare NaN/Infinity are invalid JSON -> the parse guard rejects them.
+      expect(loadTasks()).toEqual([]);
+    }
+  });
+
+  it("rejects an empty id (exercises the id.length guard)", () => {
+    // Found by a mutation sweep, not by review: deleting `t.id.length > 0`
+    // left the whole suite green. An empty id would also collide as a React
+    // key, so the guard is load-bearing and needs its own assertion.
+    const base = { title: "t", completed: false, createdAt: 1 };
+    expect(isTask({ ...base, id: "" })).toBe(false);
+    expect(isTask({ ...base, id: "ok" })).toBe(true);
+    localStorage.setItem(
+      "todo-demo:tasks",
+      '[{"id":"","title":"t","completed":false,"createdAt":1}]',
+    );
+    expect(loadTasks()).toEqual([]);
+  });
+
+  it("rejects real non-finite numbers reaching isTask directly", () => {
+    // The honest probe: call the guard with actual JS non-finite numbers,
+    // which is the only way to reach Number.isFinite at all.
+    const base = { id: "x", title: "t", completed: false };
+    expect(isTask({ ...base, createdAt: Number.POSITIVE_INFINITY })).toBe(false);
+    expect(isTask({ ...base, createdAt: Number.NEGATIVE_INFINITY })).toBe(false);
+    expect(isTask({ ...base, createdAt: Number.NaN })).toBe(false);
+    expect(isTask({ ...base, createdAt: 1 })).toBe(true);
+    expect(isTask({ ...base, createdAt: 0 })).toBe(true);
   });
 });
 
