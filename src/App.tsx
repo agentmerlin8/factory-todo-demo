@@ -66,10 +66,11 @@ export default function App() {
       setStorageFailed(false);
       // Include the running total: identical live-region text does NOT
       // re-trigger an announcement, so two tasks with the same title would
-      // otherwise announce only once. The count is both distinct per add and
-      // useful information ("3 tasks" tells the user where they stand).
+      // otherwise announce only once. Under a filter the spoken count must
+      // match the VISIBLE count, not the full total (round-1 MINOR-1).
+      const shown = filterTasks(next, filter).length;
       setAnnouncement(
-        `Added ${task.title}. ${next.length} ${next.length === 1 ? "task" : "tasks"}.`,
+        `Added ${task.title}. ${shown} ${shown === 1 ? "task" : "tasks"} shown.`,
       );
       inputRef.current?.focus();
     } catch {
@@ -97,18 +98,20 @@ export default function App() {
       // Include the completed count: direction-specific wording alone does
       // NOT distinguish completing two DIFFERENT tasks with the same title
       // (identical live-region text never re-announces — round-2 finding,
-      // same class as the TOD-1 add announcement).
-      const done = next.filter((t) => t.completed).length;
+      // same class as the TOD-1 add announcement). Counts reflect the
+      // VISIBLE (filtered) set so spoken and displayed numerics agree
+      // (round-1 MINOR-1).
+      const inView = filterTasks(next, filter);
+      const done = inView.filter((t) => t.completed).length;
       setAnnouncement(
         toggled.completed
-          ? `Completed ${toggled.title}. ${done} of ${next.length} done.`
-          : `Marked ${toggled.title} as active. ${done} of ${next.length} done.`,
+          ? `Completed ${toggled.title}. ${done} of ${inView.length} shown done.`
+          : `Marked ${toggled.title} as active. ${done} of ${inView.length} shown done.`,
       );
       // TOD-5: under a filter the toggled row may leave the view (completing
       // under Active, un-completing under Completed). Its checkbox unmounts
       // and focus would drop to the body — move to a surviving IN-VIEW
       // control, or the input when the lookup misses (TOD-4's pattern).
-      const inView = filterTasks(next, filter);
       if (!inView.some((t) => t.id === id)) {
         const survivor = inView[0];
         const survivorBtn = survivor
@@ -157,8 +160,10 @@ export default function App() {
       // Operation-specific wording plus the remaining count: two deletes
       // of same-title tasks must still re-announce (identical live-region
       // text never fires twice — same class as the add/toggle findings).
+      // The count reflects the VISIBLE (filtered) set (round-1 MINOR-1).
+      const shown = filterTasks(next, filter).length;
       setAnnouncement(
-        `Deleted ${result.task.title}. ${next.length} ${next.length === 1 ? "task" : "tasks"} left.`,
+        `Deleted ${result.task.title}. ${shown} ${shown === 1 ? "task" : "tasks"} left in view.`,
       );
       // The deleted row's button may have owned keyboard focus; removing
       // it drops focus to the body. Move to a surviving IN-VIEW delete
@@ -326,8 +331,12 @@ export default function App() {
         ) : (
           // TOD-2 AC2/AC5: empty (or corrupt) store renders a friendly line,
           // never a blank section. Reuses the theme's .tagline — no new CSS.
+          // TOD-5 round-1 MINOR-2: tasks hidden behind the filter are NOT
+          // "nothing here yet" — say what the view is missing.
           <p data-testid="empty-state" className="tagline">
-            Nothing here yet — add your first task above.
+            {tasks.length === 0
+              ? "Nothing here yet — add your first task above."
+              : `No ${filter} tasks right now.`}
           </p>
         )}
       </section>

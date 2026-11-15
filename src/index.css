@@ -326,7 +326,8 @@ h1::after {
 }
 .filter-button[aria-pressed="true"] {
   color: var(--persimmon-deep); border-color: var(--persimmon);
-  background: var(--persimmon-wash);
+  /* Solid, not the wash: wash-over-gradient hit ~4.2:1 (round-1 NIT-1). */
+  background: var(--surface-raised);
 }
 .filter-button:focus-visible {
   outline: 2px solid var(--focus-indicator); outline-offset: 2px;

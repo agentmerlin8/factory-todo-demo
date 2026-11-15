@@ -160,7 +160,7 @@ describe("screen-reader announcements (round-5 regression)", () => {
     render(<App />);
     const input = screen.getByRole("textbox", { name: /new task/i });
     await user.type(input, "Announce me{Enter}");
-    expect(screen.getByRole("status")).toHaveTextContent("Added Announce me. 1 task.");
+    expect(screen.getByRole("status")).toHaveTextContent("Added Announce me. 1 task shown.");
   });
 
   it("announces each subsequent add", async () => {
@@ -169,7 +169,7 @@ describe("screen-reader announcements (round-5 regression)", () => {
     const input = screen.getByRole("textbox", { name: /new task/i });
     await user.type(input, "First{Enter}");
     await user.type(input, "Second{Enter}");
-    expect(screen.getByRole("status")).toHaveTextContent("Added Second. 2 tasks.");
+    expect(screen.getByRole("status")).toHaveTextContent("Added Second. 2 tasks shown.");
   });
 
   it("does not announce a rejected empty submit", async () => {
@@ -575,7 +575,7 @@ describe("TOD-3 — complete / uncomplete", () => {
     const second = screen.getByRole("status").textContent;
     expect(first).toMatch(/Completed Same name/);
     expect(second).not.toBe(first);
-    expect(second).toMatch(/2 of 2 done/);
+    expect(second).toMatch(/2 of 2 shown done/);
   });
 
   it("a toggle storage failure is not masked by a pending blank-input rejection", async () => {
@@ -635,7 +635,7 @@ describe("TOD-3 — complete / uncomplete", () => {
     expect(screen.getAllByRole("listitem")).toHaveLength(2);
     expect(screen.getByRole("checkbox", { name: "Beta" })).toBeChecked();
     expect(screen.getByTestId("task-count")).toHaveTextContent("2 tasks");
-    expect(screen.getByRole("status")).toHaveTextContent(/1 of 2 done/);
+    expect(screen.getByRole("status")).toHaveTextContent(/1 of 2 shown done/);
     expect(screen.queryByRole("alert")).toBeNull();
   });
 });
@@ -1305,5 +1305,58 @@ describe("TOD-5 — filter view", () => {
     } finally {
       style.remove();
     }
+  });
+
+  it("add under a filter announces the VISIBLE count, not the full total", async () => {
+    // Round-1 MINOR-1: spoken and displayed numerics must agree.
+    saveTasks([{ id: "a", title: "Done thing", completed: true, createdAt: 1 }]);
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "Completed" }));
+    await user.type(screen.getByRole("textbox", { name: /new task/i }), "Fresh{Enter}");
+    expect(screen.getByTestId("task-count")).toHaveTextContent("1 task");
+    const spoken = screen.getByRole("status").textContent || "";
+    expect(spoken).toMatch(/Added Fresh/);
+    expect(spoken).toMatch(/1 task shown/);
+    expect(spoken).not.toMatch(/2 tasks/);
+  });
+
+  it("delete under a filter announces the VISIBLE remaining count", async () => {
+    saveTasks([
+      { id: "a", title: "Active one", completed: false, createdAt: 1 },
+      { id: "b", title: "Done one", completed: true, createdAt: 2 },
+    ]);
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "Active" }));
+    await user.click(screen.getByRole("button", { name: "Delete Active one" }));
+    expect(screen.getByTestId("task-count")).toHaveTextContent("0 tasks");
+    const spoken = screen.getByRole("status").textContent || "";
+    expect(spoken).toMatch(/Deleted Active one/);
+    expect(spoken).toMatch(/0 tasks left in view/);
+  });
+
+  it("toggle under a filter announces counts from the VISIBLE set", async () => {
+    saveTasks([
+      { id: "a", title: "Active one", completed: false, createdAt: 1 },
+      { id: "b", title: "Done one", completed: true, createdAt: 2 },
+    ]);
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "Active" }));
+    await user.click(screen.getByRole("checkbox", { name: "Active one" }));
+    // The toggled row leaves the Active view: 0 of 0 shown done.
+    expect(screen.getByRole("status")).toHaveTextContent(/0 of 0 shown done/);
+  });
+
+  it("a filtered-empty view says no matches, not 'nothing here yet'", async () => {
+    // Round-1 MINOR-2: tasks hidden behind the filter are not an empty app.
+    saveTasks([{ id: "a", title: "Active only", completed: false, createdAt: 1 }]);
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "Completed" }));
+    const empty = screen.getByTestId("empty-state");
+    expect(empty.textContent).not.toMatch(/nothing here yet/i);
+    expect(empty.textContent).toMatch(/no completed tasks/i);
   });
 });
