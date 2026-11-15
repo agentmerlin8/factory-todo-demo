@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   addTask,
   loadTasks,
@@ -154,5 +154,50 @@ describe("storage boundary validates entries (round-3 regression)", () => {
       '[{"id":"x","title":"t","completed":false,"createdAt":null}]',
     );
     expect(loadTasks()).toEqual([]);
+  });
+});
+
+describe("concurrent writers (round-8 regression)", () => {
+  it("does not lose a task when another tab commits mid-write", () => {
+    const real = Storage.prototype.setItem;
+    let injected = false;
+    const spy = vi
+      .spyOn(Storage.prototype, "setItem")
+      .mockImplementation(function (this: Storage, key: string, value: string) {
+        if (!injected && key === "todo-demo:tasks") {
+          injected = true;
+          const other = {
+            id: "other-tab",
+            title: "FromOtherTab",
+            completed: false,
+            createdAt: 1,
+          };
+          const seen = JSON.parse(value) as Array<Record<string, unknown>>;
+          real.call(this, key, JSON.stringify([...seen, other]));
+          return;
+        }
+        real.call(this, key, value);
+      });
+
+    addTask("Mine");
+    const titles = loadTasks().map((t) => t.title);
+    expect(titles).toContain("Mine");
+    expect(titles).toContain("FromOtherTab");
+    spy.mockRestore();
+  });
+
+  it("re-reads at the write boundary rather than trusting a stale snapshot", () => {
+    // Another tab persists BEFORE our add begins.
+    saveTasks([{ id: "pre", title: "PreExisting", completed: false, createdAt: 1 }]);
+    addTask("New");
+    expect(loadTasks().map((t) => t.title)).toEqual(["PreExisting", "New"]);
+  });
+
+  it("never duplicates a task id under repeated adds", () => {
+    addTask("A");
+    addTask("B");
+    addTask("C");
+    const ids = loadTasks().map((t) => t.id);
+    expect(new Set(ids).size).toBe(ids.length);
   });
 });

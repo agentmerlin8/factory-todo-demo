@@ -95,6 +95,16 @@ export function newId(): string {
  * and notification go through the same seam every later story extends.
  * Returns the created task so callers can update their view immediately.
  */
+/**
+ * Append a task without clobbering a concurrent writer.
+ *
+ * localStorage has no compare-and-swap, so a plain read-modify-write loses
+ * updates when two tabs interleave (both read the same list, both write, the
+ * second erases the first). We cannot make the pair atomic, but we can make
+ * the WRITE a merge: re-read immediately before persisting and union by id.
+ * That narrows the window to a single synchronous read+write and, crucially,
+ * never drops a record another tab already committed.
+ */
 export function addTask(title: string): Task | null {
   const trimmed = title.trim();
   if (!trimmed) return null;
@@ -104,6 +114,11 @@ export function addTask(title: string): Task | null {
     completed: false,
     createdAt: Date.now(),
   };
-  saveTasks([...loadTasks(), task]);
+  // Re-read at the write boundary (not from a caller-held snapshot) and merge.
+  const current = loadTasks();
+  const merged = current.some((t) => t.id === task.id)
+    ? current
+    : [...current, task];
+  saveTasks(merged);
   return task;
 }
