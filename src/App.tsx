@@ -1,14 +1,14 @@
 import { useRef, useState } from "react";
 import type { FormEvent } from "react";
-import { addTask, loadTasks, type Task } from "./store";
+import { addTask, loadTasks, sortNewestFirst, type Task } from "./store";
 
 /**
- * TOD-1 — add a task. Form + list on the store seam (src/store.ts is the
- * only module touching localStorage). Stories TOD-2…TOD-5 extend this
- * shell; ordering, toggling, deleting and filtering land there.
+ * TOD-1 — add a task; TOD-2 — list tasks. Form + list on the store seam
+ * (src/store.ts is the only module touching localStorage). Ordering and the
+ * empty state live here; toggling, deleting and filtering land in TOD-3…5.
  */
 export default function App() {
-  const [tasks, setTasks] = useState<Task[]>(() => loadTasks());
+  const [tasks, setTasks] = useState<Task[]>(() => sortNewestFirst(loadTasks()));
   const [title, setTitle] = useState("");
   const [rejected, setRejected] = useState(false);
   const [storageFailed, setStorageFailed] = useState(false);
@@ -30,8 +30,9 @@ export default function App() {
       }
       // Read back from the store, not from React state: another tab may have
       // persisted tasks since this component last rendered. Spreading stale
-      // `tasks` would silently drop them until reload.
-      const next = loadTasks();
+      // `tasks` would silently drop them until reload. Order at the view
+      // boundary so adds and reloads both render newest-first (TOD-2 AC1).
+      const next = sortNewestFirst(loadTasks());
       setTasks(next);
       setTitle("");
       setRejected(false);
@@ -111,7 +112,7 @@ export default function App() {
         <p data-testid="task-count" className="task-count">
           {tasks.length === 1 ? "1 task" : `${tasks.length} tasks`}
         </p>
-        {tasks.length > 0 && (
+        {tasks.length > 0 ? (
           <ul className="task-list">
             {tasks.map((task) => (
               <li key={task.id} className="task-item">
@@ -120,6 +121,12 @@ export default function App() {
               </li>
             ))}
           </ul>
+        ) : (
+          // TOD-2 AC2/AC5: empty (or corrupt) store renders a friendly line,
+          // never a blank section. Reuses the theme's .tagline — no new CSS.
+          <p data-testid="empty-state" className="tagline">
+            Nothing here yet — add your first task above.
+          </p>
         )}
       </section>
 
