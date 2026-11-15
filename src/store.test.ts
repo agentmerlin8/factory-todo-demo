@@ -8,6 +8,7 @@ import {
   loadFilter,
   saveFilter,
   newId,
+  deleteTask,
   sortNewestFirst,
   subscribe,
   toggleTask,
@@ -439,5 +440,149 @@ describe("toggleTask (TOD-3)", () => {
     // silent on an "unknown id".
     expect(loadTasks()).toEqual([]);
     expect(() => toggleTask("a")).toThrow();
+  });
+});
+
+describe("deleteTask (TOD-4)", () => {
+  const seedThree = () =>
+    saveTasks([
+      { id: "a", title: "Alpha", completed: false, createdAt: 1 },
+      { id: "b", title: "Beta", completed: true, createdAt: 2 },
+      { id: "c", title: "Gamma", completed: false, createdAt: 3 },
+    ]);
+
+  it("removes only the target task and persists the remainder", () => {
+    seedThree();
+    const result = deleteTask("b");
+    expect(result).not.toBeNull();
+    expect(result?.task).toEqual({
+      id: "b", title: "Beta", completed: true, createdAt: 2,
+    });
+    expect(result?.tasks.map((t) => t.id)).toEqual(["a", "c"]);
+    expect(loadTasks().map((t) => t.id)).toEqual(["a", "c"]);
+    // The returned snapshot IS what was committed — callers render from it.
+    expect(result?.tasks).toEqual(loadTasks());
+  });
+
+  it("deleting an absent id is a no-op: null, no write, no notification", () => {
+    seedThree();
+    const before = localStorage.getItem("todo-demo:tasks");
+    const setSpy = vi.spyOn(Storage.prototype, "setItem");
+    let calls = 0;
+    const unsubscribe = subscribe(() => {
+      calls += 1;
+    });
+    expect(deleteTask("missing")).toBeNull();
+    expect(setSpy).not.toHaveBeenCalled();
+    expect(localStorage.getItem("todo-demo:tasks")).toBe(before);
+    expect(calls).toBe(0);
+    unsubscribe();
+  });
+
+  it("deleting the last task persists an empty list", () => {
+    saveTasks([{ id: "solo", title: "Only", completed: false, createdAt: 1 }]);
+    const result = deleteTask("solo");
+    expect(result?.tasks).toEqual([]);
+    expect(loadTasks()).toEqual([]);
+    expect(localStorage.getItem("todo-demo:tasks")).toBe("[]");
+  });
+
+  it("preserves tasks another tab committed before our write", () => {
+    seedThree();
+    saveTasks([
+      ...loadTasks(),
+      { id: "other", title: "FromOtherTab", completed: false, createdAt: 4 },
+    ]);
+    const result = deleteTask("b");
+    expect(result?.tasks.map((t) => t.id).sort()).toEqual(["a", "c", "other"]);
+    expect(loadTasks().map((t) => t.id).sort()).toEqual(["a", "c", "other"]);
+  });
+
+  it("merges a commit landing between the first read and the write", () => {
+    // Same closable window as the toggle round-1 probe: a commit injected
+    // after the first getItem and before the write-boundary re-read must
+    // survive. A stale-snapshot overwrite drops it.
+    saveTasks([{ id: "a", title: "Target", completed: false, createdAt: 1 }]);
+    const realGet = Storage.prototype.getItem;
+    const realSet = Storage.prototype.setItem;
+    let gets = 0;
+    const spy = vi
+      .spyOn(Storage.prototype, "getItem")
+      .mockImplementation(function (this: Storage, key: string) {
+        if (key === "todo-demo:tasks") {
+          gets += 1;
+          if (gets === 2) {
+            const other = {
+              id: "other-tab", title: "theirs", completed: false, createdAt: 99,
+            };
+            const current = JSON.parse(realGet.call(this, key) || "[]");
+            realSet.call(this, key, JSON.stringify([...current, other]));
+          }
+        }
+        return realGet.call(this, key);
+      });
+    const result = deleteTask("a");
+    spy.mockRestore();
+    expect(result?.tasks.map((t) => t.id)).toEqual(["other-tab"]);
+    expect(loadTasks().map((t) => t.title)).toEqual(["theirs"]);
+  });
+
+  it("returns null when another tab removed the target between reads", () => {
+    saveTasks([{ id: "a", title: "Gone soon", completed: false, createdAt: 1 }]);
+    const realGet = Storage.prototype.getItem;
+    const realSet = Storage.prototype.setItem;
+    let gets = 0;
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(function (
+      this: Storage, key: string,
+    ) {
+      if (key === "todo-demo:tasks") {
+        gets += 1;
+        if (gets === 2) realSet.call(this, key, "[]");
+      }
+      return realGet.call(this, key);
+    });
+    expect(deleteTask("a")).toBeNull();
+  });
+
+  it("notifies subscribers once per successful delete, never on a no-op", () => {
+    seedThree();
+    let calls = 0;
+    const unsubscribe = subscribe(() => {
+      calls += 1;
+    });
+    deleteTask("a");
+    expect(calls).toBe(1);
+    deleteTask("missing");
+    expect(calls).toBe(1);
+    unsubscribe();
+    deleteTask("b");
+    expect(calls).toBe(1);
+  });
+
+  it("propagates storage WRITE failures without mutating storage or notifying", () => {
+    seedThree();
+    const before = loadTasks();
+    let calls = 0;
+    const unsubscribe = subscribe(() => {
+      calls += 1;
+    });
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("Quota exceeded", "QuotaExceededError");
+    });
+    expect(() => deleteTask("b")).toThrow();
+    expect(loadTasks()).toEqual(before);
+    expect(calls).toBe(0);
+    unsubscribe();
+  });
+
+  it("propagates storage READ errors (strict mutation read)", () => {
+    seedThree();
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new DOMException("Storage disabled", "SecurityError");
+    });
+    // Tolerant load still renders empty; the mutation path must surface the
+    // access failure instead of silently treating it as "unknown id".
+    expect(loadTasks()).toEqual([]);
+    expect(() => deleteTask("b")).toThrow();
   });
 });

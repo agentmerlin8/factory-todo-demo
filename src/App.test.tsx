@@ -639,3 +639,243 @@ describe("TOD-3 — complete / uncomplete", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 });
+
+describe("TOD-4 — delete a task", () => {
+  const seedTwo = () =>
+    saveTasks([
+      { id: "a", title: "Write the tests", completed: false, createdAt: 1 },
+      { id: "b", title: "Ship the story", completed: false, createdAt: 2 },
+    ]);
+
+  it("AC1: every task has a delete control named for its task", () => {
+    seedTwo();
+    render(<App />);
+    const buttons = screen.getAllByRole("button", { name: /^delete/i });
+    expect(buttons).toHaveLength(2);
+    expect(
+      screen.getByRole("button", { name: /delete.*Ship the story/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /delete.*Write the tests/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("AC2: delete removes the task from the list and the store, count updates", async () => {
+    seedTwo();
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(
+      screen.getByRole("button", { name: /delete.*Ship the story/i }),
+    );
+    expect(screen.getAllByRole("listitem")).toHaveLength(1);
+    expect(screen.getByRole("listitem")).toHaveTextContent("Write the tests");
+    expect(loadTasks().map((t) => t.id)).toEqual(["a"]);
+    expect(screen.getByTestId("task-count")).toHaveTextContent("1 task");
+    // Newest-first order holds through deletion (TOD-2 AC1).
+    await user.type(
+      screen.getByRole("textbox", { name: /new task/i }),
+      "Newer{Enter}",
+    );
+    expect(
+      screen.getAllByRole("listitem").map((n) => n.textContent),
+    ).toEqual(["Newer", "Write the tests"]);
+  });
+
+  it("AC3: deletion survives reload (fresh mount reads the store)", async () => {
+    seedTwo();
+    const user = userEvent.setup();
+    const { unmount } = render(<App />);
+    await user.click(
+      screen.getByRole("button", { name: /delete.*Ship the story/i }),
+    );
+    expect(loadTasks().map((t) => t.id)).toEqual(["a"]);
+
+    // Simulate a page reload: tear down, mount fresh from the same store.
+    unmount();
+    render(<App />);
+    expect(screen.getAllByRole("listitem")).toHaveLength(1);
+    expect(screen.getByRole("listitem")).toHaveTextContent("Write the tests");
+    expect(
+      screen.queryByRole("button", { name: /delete.*Ship the story/i }),
+    ).toBeNull();
+  });
+
+  it("AC4: deleting the last task returns to the TOD-2 empty state", async () => {
+    saveTasks([{ id: "solo", title: "Last one", completed: false, createdAt: 1 }]);
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(
+      screen.getByRole("button", { name: /delete.*Last one/i }),
+    );
+    expect(screen.queryByRole("listitem")).toBeNull();
+    expect(screen.queryByRole("list")).toBeNull();
+    expect(screen.getByTestId("empty-state")).toHaveTextContent(
+      /nothing here yet/i,
+    );
+    expect(screen.getByTestId("task-count")).toHaveTextContent("0 tasks");
+    expect(loadTasks()).toEqual([]);
+  });
+
+  it("deletions are announced in the polite live region, distinctly", async () => {
+    saveTasks([
+      { id: "a", title: "Same name", completed: false, createdAt: 1 },
+      { id: "b", title: "Same name", completed: false, createdAt: 2 },
+    ]);
+    const user = userEvent.setup();
+    render(<App />);
+    const buttons = screen.getAllByRole("button", { name: /delete.*Same name/i });
+    await user.click(buttons[0]);
+    const first = screen.getByRole("status").textContent;
+    expect(first).toMatch(/Deleted Same name/i);
+    expect(first).toMatch(/1 task/);
+    await user.click(screen.getByRole("button", { name: /delete.*Same name/i }));
+    const second = screen.getByRole("status").textContent;
+    // Same title twice must still re-announce: the count distinguishes.
+    expect(second).not.toBe(first);
+    expect(second).toMatch(/0 tasks/);
+    // Wording differs from add/toggle announcements (operation-specific).
+    expect(second).not.toMatch(/^Added|^Completed|^Marked/);
+  });
+
+  it("AC5: storage throws on delete -> task stays visible, accessible error", async () => {
+    seedTwo();
+    const user = userEvent.setup();
+    render(<App />);
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("Quota exceeded", "QuotaExceededError");
+    });
+    await user.click(
+      screen.getByRole("button", { name: /delete.*Ship the story/i }),
+    );
+    // No silent data loss: the task remains in the list AND the store.
+    expect(screen.getAllByRole("listitem")).toHaveLength(2);
+    expect(loadTasks().map((t) => t.id)).toEqual(["a", "b"]);
+    expect(screen.getByRole("alert")).toHaveTextContent(/couldn’t be saved/i);
+    // No success announcement for a delete that never happened.
+    expect(screen.getByRole("status")).toHaveTextContent("");
+    expect(screen.getByTestId("task-count")).toHaveTextContent("2 tasks");
+  });
+
+  it("AC5: a storage READ failure during delete surfaces the alert", async () => {
+    seedTwo();
+    const user = userEvent.setup();
+    render(<App />);
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new DOMException("Storage disabled", "SecurityError");
+    });
+    await user.click(
+      screen.getByRole("button", { name: /delete.*Ship the story/i }),
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent(/couldn’t be saved/i);
+    expect(screen.getAllByRole("listitem")).toHaveLength(2);
+  });
+
+  it("a delete storage failure is not masked by a pending blank-input rejection", async () => {
+    seedTwo();
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: /^add$/i }));
+    expect(screen.getByRole("alert")).toHaveTextContent(/give the task a name/i);
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("Quota exceeded", "QuotaExceededError");
+    });
+    await user.click(
+      screen.getByRole("button", { name: /delete.*Ship the story/i }),
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent(/couldn’t be saved/i);
+    expect(screen.getAllByRole("listitem")).toHaveLength(2);
+  });
+
+  it("a successful delete clears a prior storage-failure alert", async () => {
+    seedTwo();
+    const user = userEvent.setup();
+    render(<App />);
+    const spy = vi
+      .spyOn(Storage.prototype, "setItem")
+      .mockImplementation(() => {
+        throw new DOMException("Quota exceeded", "QuotaExceededError");
+      });
+    await user.click(
+      screen.getByRole("button", { name: /delete.*Ship the story/i }),
+    );
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+    spy.mockRestore();
+    await user.click(
+      screen.getByRole("button", { name: /delete.*Ship the story/i }),
+    );
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getAllByRole("listitem")).toHaveLength(1);
+  });
+
+  it("a POST-WRITE read failure keeps the committed list visible", async () => {
+    // The delete commits; only a later read fails. Rendering from the
+    // committed snapshot keeps the remaining task, count and announcement
+    // truthful instead of wiping the list (same contract as TOD-3 round-3).
+    seedTwo();
+    const user = userEvent.setup();
+    render(<App />);
+    const realGet = Storage.prototype.getItem;
+    let gets = 0;
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(function (
+      this: Storage, key: string,
+    ) {
+      if (key === "todo-demo:tasks") {
+        gets += 1;
+        if (gets >= 3) {
+          throw new DOMException("Storage disabled", "SecurityError");
+        }
+      }
+      return realGet.call(this, key);
+    });
+    await user.click(
+      screen.getByRole("button", { name: /delete.*Ship the story/i }),
+    );
+    expect(screen.getAllByRole("listitem")).toHaveLength(1);
+    expect(screen.getByRole("listitem")).toHaveTextContent("Write the tests");
+    expect(screen.getByTestId("task-count")).toHaveTextContent("1 task");
+    expect(screen.getByRole("status")).toHaveTextContent(/Deleted Ship the story/);
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("delete includes tasks another tab committed (committed-snapshot render)", async () => {
+    seedTwo();
+    const user = userEvent.setup();
+    render(<App />);
+    // Another tab commits before our delete; the store must merge, and the
+    // rendered list must come from the committed snapshot.
+    saveTasks([
+      ...loadTasks(),
+      { id: "other", title: "FromOtherTab", completed: false, createdAt: 3 },
+    ]);
+    await user.click(
+      screen.getByRole("button", { name: /delete.*Ship the story/i }),
+    );
+    const titles = screen.getAllByRole("listitem").map((n) => n.textContent);
+    expect(titles).toEqual(["FromOtherTab", "Write the tests"]);
+    expect(screen.getByTestId("task-count")).toHaveTextContent("2 tasks");
+  });
+
+  it("delete control carries the theme's opaque focus ring", async () => {
+    const style = document.createElement("style");
+    style.textContent = themeCss;
+    document.head.appendChild(style);
+    try {
+      seedTwo();
+      render(<App />);
+      const user = userEvent.setup();
+      // autoFocus starts on the input; keyboard Tab activates :focus-visible.
+      await user.tab(); // Add
+      await user.tab(); // newest checkbox
+      await user.tab(); // newest delete button
+      const button = screen.getByRole("button", {
+        name: /delete.*Ship the story/i,
+      });
+      expect(button).toHaveFocus();
+      const s = getComputedStyle(button);
+      expect(s.outlineStyle).toBe("solid");
+      expect(s.outlineColor).toBe("rgb(178, 62, 2)");
+    } finally {
+      style.remove();
+    }
+  });
+});

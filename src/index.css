@@ -380,6 +380,20 @@ h1::after {
   color: var(--ink-soft);
 }
 
+/* TOD-4 delete control. */
+.task-delete {
+  margin-left: auto;
+  padding: 0.1rem 0.45rem;
+  font: 600 0.95rem/1.4 var(--sans);
+  color: var(--danger); /* ~5.6:1 on raised surface, light and dark (AA) */
+  background: none; border: 0; cursor: pointer;
+}
+.task-delete::before { content: "✕"; }
+.task-delete:focus-visible {
+  outline: 2px solid var(--focus-indicator);
+  outline-offset: 2px;
+}
+
 /* ── Footer ────────────────────────────────────────────────────── */
 
 .app-footer {
