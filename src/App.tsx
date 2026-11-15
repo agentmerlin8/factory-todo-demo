@@ -1,12 +1,19 @@
 import { useRef, useState } from "react";
 import type { FormEvent } from "react";
-import { addTask, loadTasks, sortNewestFirst, toggleTask, type Task } from "./store";
+import {
+  addTask,
+  deleteTask,
+  loadTasks,
+  sortNewestFirst,
+  toggleTask,
+  type Task,
+} from "./store";
 
 /**
- * TOD-1 — add a task; TOD-2 — list tasks; TOD-3 — complete/uncomplete.
- * Form + list on the store seam (src/store.ts is the only module touching
- * localStorage). Ordering and the empty state live here; deleting and
- * filtering land in TOD-4…5.
+ * TOD-1 — add a task; TOD-2 — list tasks; TOD-3 — complete/uncomplete;
+ * TOD-4 — delete a task. Form + list on the store seam (src/store.ts is
+ * the only module touching localStorage). Ordering and the empty state
+ * live here; filtering lands in TOD-5.
  */
 export default function App() {
   const [tasks, setTasks] = useState<Task[]>(() => sortNewestFirst(loadTasks()));
@@ -63,6 +70,11 @@ export default function App() {
       const next = sortNewestFirst(result.tasks);
       setTasks(next);
       setStorageFailed(false);
+      // A successful mutation also clears any pending blank-input rejection:
+      // the shared alert prioritizes `rejected`, which would otherwise keep
+      // showing "Give the task a name" after a successful toggle (round-1
+      // finding; same class as the failure-path masking fixed in TOD-3).
+      setRejected(false);
       // Include the completed count: direction-specific wording alone does
       // NOT distinguish completing two DIFFERENT tasks with the same title
       // (identical live-region text never re-announces — round-2 finding,
@@ -80,6 +92,58 @@ export default function App() {
       // Clear a pending blank-input rejection first: the shared alert
       // prioritizes `rejected`, which would otherwise mask the storage
       // error with "Give the task a name" (round-2 finding).
+      setRejected(false);
+      setStorageFailed(true);
+    }
+  }
+
+  function handleDelete(id: string) {
+    try {
+      const result = deleteTask(id);
+      if (!result) {
+        // Another tab already deleted this task. Drop the obsolete row from
+        // local state — no storage read/write, no deletion announcement
+        // (nothing was deleted HERE). Round-2 finding: the early return
+        // left a stale row and count, even for the last task.
+        setTasks((prev) => prev.filter((t) => t.id !== id));
+        inputRef.current?.focus();
+        return;
+      }
+      // Render from the COMMITTED snapshot — no post-write readback, same
+      // contract as toggle (a fallible read after a successful save can
+      // wipe the visible list).
+      const next = sortNewestFirst(result.tasks);
+      setTasks(next);
+      setStorageFailed(false);
+      // Clear a pending blank-input rejection on success too — a stale
+      // assertive "Give the task a name" after a successful delete is
+      // misleading (round-1 finding, same class as the toggle path).
+      setRejected(false);
+      // Operation-specific wording plus the remaining count: two deletes
+      // of same-title tasks must still re-announce (identical live-region
+      // text never fires twice — same class as the add/toggle findings).
+      setAnnouncement(
+        `Deleted ${result.task.title}. ${next.length} ${next.length === 1 ? "task" : "tasks"} left.`,
+      );
+      // The deleted row's button may have owned keyboard focus; removing
+      // it drops focus to the body. Move to a surviving delete control, or
+      // the new-task input as the stable fallback (round-2 finding). The
+      // survivor may be a task another tab just added — its button is not
+      // mounted yet (React batches setTasks), so fall back whenever the
+      // lookup misses, not only when the committed list is empty (round-3).
+      const survivor = next.find((t) => t.id !== id);
+      const survivorBtn = survivor
+        ? document.getElementById(`task-delete-${survivor.id}`)
+        : null;
+      if (survivorBtn) {
+        survivorBtn.focus();
+      } else {
+        inputRef.current?.focus();
+      }
+    } catch {
+      // AC5: `tasks` is untouched, so the row stays visible while the store
+      // still holds it — no silent loss. Shared assertive alert; clear the
+      // blank-input flag first so it cannot mask the storage error.
       setRejected(false);
       setStorageFailed(true);
     }
@@ -169,6 +233,17 @@ export default function App() {
                 <label className="task-title" htmlFor={`task-toggle-${task.id}`}>
                   {task.title}
                 </label>
+                {/* TOD-4 AC1: per-task delete, named for screen readers via
+                    aria-label; the ✕ glyph is CSS content so the row's text
+                    stays the task title alone. type="button" — never submits
+                    the add form. */}
+                <button
+                  id={`task-delete-${task.id}`}
+                  type="button"
+                  className="task-delete"
+                  aria-label={`Delete ${task.title}`}
+                  onClick={() => handleDelete(task.id)}
+                />
               </li>
             ))}
           </ul>

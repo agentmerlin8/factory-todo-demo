@@ -208,3 +208,31 @@ export function toggleTask(id: string): ToggleResult | null {
   emit();
   return { task: toggled, tasks: committed };
 }
+
+/**
+ * TOD-4 — remove one task by id. Same write-boundary discipline as
+ * toggleTask: strict read for the existence check (access errors
+ * propagate), re-read immediately before setItem so a concurrent tab's
+ * committed task survives, and the COMMITTED snapshot is returned for
+ * rendering — no post-write readback. Returns null when the id is unknown
+ * (no write, no notification). A storage failure propagates BEFORE emit,
+ * so the task is never gone from the UI while still in the store, or vice
+ * versa (AC5).
+ */
+export interface DeleteResult {
+  task: Task;
+  /** The exact list committed by this write; callers render from THIS. */
+  tasks: Task[];
+}
+
+export function deleteTask(id: string): DeleteResult | null {
+  const current = readTasksStrict();
+  if (!current.some((t) => t.id === id)) return null;
+  const fresh = readTasksStrict();
+  const removed = fresh.find((t) => t.id === id);
+  if (!removed) return null; // removed by another tab between reads
+  const committed = fresh.filter((t) => t.id !== id);
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(committed));
+  emit();
+  return { task: removed, tasks: committed };
+}
