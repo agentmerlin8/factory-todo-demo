@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import App from "./App";
@@ -6,6 +6,10 @@ import { loadTasks } from "./store";
 
 beforeEach(() => {
   localStorage.clear();
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 describe("TOD-1 — add a task", () => {
@@ -53,6 +57,24 @@ describe("TOD-1 — add a task", () => {
     expect(screen.queryByRole("listitem")).toBeNull();
     expect(loadTasks()).toEqual([]);
     expect(input).toHaveFocus();
+  });
+
+  it("retains the draft and reports storage failures accessibly", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("Quota exceeded", "QuotaExceededError");
+    });
+    render(<App />);
+    const input = screen.getByRole("textbox", { name: /new task/i });
+    await user.type(input, "Keep this draft");
+    await user.click(screen.getByRole("button", { name: /^add$/i }));
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Task couldn’t be saved. Check browser storage and try again.",
+    );
+    expect(input).toHaveValue("Keep this draft");
+    expect(input).toHaveFocus();
+    expect(screen.queryByRole("listitem")).toBeNull();
   });
 
   it("new tasks appear immediately and accumulate in the list", async () => {

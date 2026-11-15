@@ -11,21 +11,28 @@ export default function App() {
   const [tasks, setTasks] = useState<Task[]>(() => loadTasks());
   const [title, setTitle] = useState("");
   const [rejected, setRejected] = useState(false);
+  const [storageFailed, setStorageFailed] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const task = addTask(title);
-    if (!task) {
-      // AC2: empty/whitespace rejected — no task created, input keeps focus.
-      setRejected(true);
+    try {
+      const task = addTask(title);
+      if (!task) {
+        // AC2: empty/whitespace rejected — no task created, input keeps focus.
+        setRejected(true);
+        inputRef.current?.focus();
+        return;
+      }
+      setTasks((current) => [...current, task]);
+      setTitle("");
+      setRejected(false);
+      setStorageFailed(false);
       inputRef.current?.focus();
-      return;
+    } catch {
+      setStorageFailed(true);
+      inputRef.current?.focus();
     }
-    setTasks((current) => [...current, task]);
-    setTitle("");
-    setRejected(false);
-    inputRef.current?.focus();
   }
 
   return (
@@ -50,6 +57,7 @@ export default function App() {
             onChange={(event) => {
               setTitle(event.target.value);
               if (rejected) setRejected(false);
+              if (storageFailed) setStorageFailed(false);
             }}
             placeholder="What needs doing?"
             autoComplete="off"
@@ -63,12 +71,18 @@ export default function App() {
         </div>
         <p
           id="add-hint"
-          className={rejected ? "add-hint add-hint--error" : "add-hint"}
-          role={rejected ? "alert" : undefined}
+          className={
+            rejected || storageFailed
+              ? "add-hint add-hint--error"
+              : "add-hint"
+          }
+          role={rejected || storageFailed ? "alert" : undefined}
         >
           {rejected
             ? "Give the task a name — blank tasks don’t count."
-            : "Press Enter or hit Add. Everything stays in this browser."}
+            : storageFailed
+              ? "Task couldn’t be saved. Check browser storage and try again."
+              : "Press Enter or hit Add. Everything stays in this browser."}
         </p>
       </form>
 
