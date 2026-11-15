@@ -157,25 +157,29 @@ export function addTask(title: string): Task | null {
 }
 
 /**
- * TOD-3 — flip one task's `completed` flag. Reads the current store
- * immediately before the write (same minimum-window discipline as
- * appendTasks), so a concurrent commit from another tab is preserved.
- * Returns the updated task, or null when the id is unknown (no write, no
+ * TOD-3 — flip one task's `completed` flag. Same merge discipline as
+ * appendTasks: re-read immediately before the write and union by id, so a
+ * task another tab committed is never dropped. Our toggle is applied to
+ * the FRESH copy (last-writer-wins for the flag itself — localStorage has
+ * no compare-and-swap; the window is narrowed, not eliminated). Returns
+ * the updated task, or null when the id is unknown (no write, no
  * notification). A storage failure propagates BEFORE emit and before any
  * caller can render the new state — nothing unsaved is ever announced
  * (TOD-3 AC5).
  */
 export function toggleTask(id: string): Task | null {
   const current = loadTasks();
-  const index = current.findIndex((t) => t.id === id);
-  if (index === -1) return null;
-  const toggled: Task = {
-    ...current[index],
-    completed: !current[index].completed,
-  };
-  const next = [...current];
-  next[index] = toggled;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+  if (!current.some((t) => t.id === id)) return null;
+  // Re-read + merge immediately before setItem (see appendTasks). A plain
+  // array overwrite here would drop a concurrent tab's committed task —
+  // mutation-proven in the round-1 review probe.
+  const fresh = loadTasks();
+  const byId = new Map(fresh.map((t) => [t.id, t]));
+  const base = byId.get(id);
+  if (!base) return null; // removed by another tab between reads
+  const toggled: Task = { ...base, completed: !base.completed };
+  byId.set(id, toggled);
+  localStorage.setItem(STORAGE_KEY, JSON.stringify([...byId.values()]));
   emit();
   return toggled;
 }

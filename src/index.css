@@ -360,19 +360,17 @@ h1::after {
   transform: translateX(3px);
 }
 
-.task-dot {
-  flex-shrink: 0;
-  width: 0.55rem;
-  height: 0.55rem;
-  border-radius: 50%;
-  align-self: center;
-  background: linear-gradient(135deg, var(--persimmon), var(--marigold));
-  box-shadow: 0 0 0 3px var(--persimmon-wash);
-}
-
 .task-title {
   overflow-wrap: anywhere;
   color: var(--ink);
+}
+
+/* Round-1 MINOR-2: the checkbox carries the same opaque >=3:1 focus
+   indicator as the other controls — the browser default ring is not
+   guaranteed to meet the theme's contrast on every surface. */
+.task-item input[type="checkbox"]:focus-visible {
+  outline: 2px solid var(--focus-indicator);
+  outline-offset: 2px;
 }
 
 /* TOD-3 AC2 — completed state. Muted ink stays AA: --ink-soft on

@@ -354,6 +354,38 @@ describe("toggleTask (TOD-3)", () => {
     expect(loadTasks().find((t) => t.id === "a")?.completed).toBe(true);
   });
 
+  it("merges a commit landing between the first read and the write", () => {
+    // Round-1 review finding (mutation-proven): the original toggleTask
+    // overwrote the array from its first read, dropping a task another tab
+    // committed in between. Injection fires after the first getItem returns
+    // and before the write-boundary re-read — the closable window. (A commit
+    // inside the final setItem itself is the platform's no-CAS limit.)
+    seed(false);
+    const realGet = Storage.prototype.getItem;
+    const realSet = Storage.prototype.setItem;
+    let gets = 0;
+    const spy = vi
+      .spyOn(Storage.prototype, "getItem")
+      .mockImplementation(function (this: Storage, key: string) {
+        if (key === "todo-demo:tasks") {
+          gets += 1;
+          if (gets === 2) {
+            const other = {
+              id: "other-tab", title: "theirs", completed: false, createdAt: 99,
+            };
+            const current = JSON.parse(realGet.call(this, key) || "[]");
+            realSet.call(this, key, JSON.stringify([...current, other]));
+          }
+        }
+        return realGet.call(this, key);
+      });
+    toggleTask("a");
+    spy.mockRestore();
+    const tasks = loadTasks();
+    expect(tasks.map((t) => t.title).sort()).toEqual(["Toggle me", "theirs"]);
+    expect(tasks.find((t) => t.id === "a")?.completed).toBe(true);
+  });
+
   it("notifies subscribers once per successful toggle", () => {
     seed(false);
     let calls = 0;

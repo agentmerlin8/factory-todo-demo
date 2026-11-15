@@ -538,4 +538,23 @@ describe("TOD-3 — complete / uncomplete", () => {
     expect(screen.queryByRole("alert")).toBeNull();
     expect(screen.getByRole("status")).toHaveTextContent("Added Recovery.");
   });
+
+  it("a successful toggle clears a prior storage-failure alert", async () => {
+    // Symmetric coverage (round-1 MINOR-1): deleting setStorageFailed(false)
+    // from handleToggle's success path must turn this test red.
+    seedTwo();
+    const user = userEvent.setup();
+    render(<App />);
+    const spy = vi
+      .spyOn(Storage.prototype, "setItem")
+      .mockImplementation(() => {
+        throw new DOMException("Quota exceeded", "QuotaExceededError");
+      });
+    await user.click(screen.getByRole("checkbox", { name: "Ship the story" }));
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+    spy.mockRestore();
+    await user.click(screen.getByRole("checkbox", { name: "Ship the story" }));
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByRole("checkbox", { name: "Ship the story" })).toBeChecked();
+  });
 });

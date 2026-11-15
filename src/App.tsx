@@ -147,14 +147,18 @@ export default function App() {
               >
                 {/* TOD-3 AC1: the checkbox takes the marker slot the decorative
                     dot held. Controlled by the store-backed state, so a failed
-                    persist reverts it (AC5) instead of showing an unsaved flip. */}
+                    persist reverts it (AC5) instead of showing an unsaved flip.
+                    The title is a real <label>, so clicking the text toggles
+                    too (round-1 MINOR-3). */}
                 <input
+                  id={`task-toggle-${task.id}`}
                   type="checkbox"
                   checked={task.completed}
                   onChange={() => handleToggle(task.id)}
-                  aria-label={task.title}
                 />
-                <span className="task-title">{task.title}</span>
+                <label className="task-title" htmlFor={`task-toggle-${task.id}`}>
+                  {task.title}
+                </label>
               </li>
             ))}
           </ul>
