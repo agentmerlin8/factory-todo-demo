@@ -28,11 +28,18 @@ export default function App() {
         inputRef.current?.focus();
         return;
       }
-      setTasks((current) => [...current, task]);
+      const next = [...tasks, task];
+      setTasks(next);
       setTitle("");
       setRejected(false);
       setStorageFailed(false);
-      setAnnouncement(`Added ${task.title}.`);
+      // Include the running total: identical live-region text does NOT
+      // re-trigger an announcement, so two tasks with the same title would
+      // otherwise announce only once. The count is both distinct per add and
+      // useful information ("3 tasks" tells the user where they stand).
+      setAnnouncement(
+        `Added ${task.title}. ${next.length} ${next.length === 1 ? "task" : "tasks"}.`,
+      );
       inputRef.current?.focus();
     } catch {
       setStorageFailed(true);

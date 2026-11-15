@@ -146,7 +146,7 @@ describe("screen-reader announcements (round-5 regression)", () => {
     render(<App />);
     const input = screen.getByRole("textbox", { name: /new task/i });
     await user.type(input, "Announce me{Enter}");
-    expect(screen.getByRole("status")).toHaveTextContent("Added Announce me.");
+    expect(screen.getByRole("status")).toHaveTextContent("Added Announce me. 1 task.");
   });
 
   it("announces each subsequent add", async () => {
@@ -155,7 +155,7 @@ describe("screen-reader announcements (round-5 regression)", () => {
     const input = screen.getByRole("textbox", { name: /new task/i });
     await user.type(input, "First{Enter}");
     await user.type(input, "Second{Enter}");
-    expect(screen.getByRole("status")).toHaveTextContent("Added Second.");
+    expect(screen.getByRole("status")).toHaveTextContent("Added Second. 2 tasks.");
   });
 
   it("does not announce a rejected empty submit", async () => {
@@ -177,5 +177,31 @@ describe("screen-reader announcements (round-5 regression)", () => {
     expect(screen.getByRole("alert")).toHaveTextContent(/couldn’t be saved/i);
     expect(screen.getByRole("status")).toHaveTextContent("");
     vi.restoreAllMocks();
+  });
+});
+
+describe("repeated titles still announce (round-6 regression)", () => {
+  it("changes the live-region text when the same title is added twice", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    const input = screen.getByRole("textbox", { name: /new task/i });
+    await user.type(input, "Same{Enter}");
+    const first = screen.getByRole("status").textContent;
+    await user.type(input, "Same{Enter}");
+    const second = screen.getByRole("status").textContent;
+    expect(second).not.toBe(first);
+    expect(second).toContain("2 tasks");
+  });
+
+  it("announces three identical adds distinctly", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    const input = screen.getByRole("textbox", { name: /new task/i });
+    const seen = new Set<string>();
+    for (let i = 0; i < 3; i += 1) {
+      await user.type(input, "Dup{Enter}");
+      seen.add(screen.getByRole("status").textContent ?? "");
+    }
+    expect(seen.size).toBe(3);
   });
 });
