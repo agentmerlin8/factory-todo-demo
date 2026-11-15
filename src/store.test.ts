@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   addTask,
+  appendTasks,
   loadTasks,
   saveTasks,
   loadFilter,
@@ -158,32 +159,50 @@ describe("storage boundary validates entries (round-3 regression)", () => {
 });
 
 describe("concurrent writers (round-8 regression)", () => {
-  it("does not lose a task when another tab commits mid-write", () => {
-    const real = Storage.prototype.setItem;
-    let injected = false;
-    const spy = vi
-      .spyOn(Storage.prototype, "setItem")
-      .mockImplementation(function (this: Storage, key: string, value: string) {
-        if (!injected && key === "todo-demo:tasks") {
-          injected = true;
-          const other = {
-            id: "other-tab",
-            title: "FromOtherTab",
-            completed: false,
-            createdAt: 1,
-          };
-          const seen = JSON.parse(value) as Array<Record<string, unknown>>;
-          real.call(this, key, JSON.stringify([...seen, other]));
-          return;
-        }
-        real.call(this, key, value);
-      });
-
+  /**
+   * Lost update = another tab commits between our READ and our WRITE.
+   *
+   * Two earlier attempts at this test were wrong, and both are worth
+   * remembering:
+   *  1. Injecting into our own outgoing setItem payload — the other task
+   *     survives even with buggy code, so the test proves nothing.
+   *  2. Injecting on getItem but RETURNING the pre-injection value — the
+   *     implementation then correctly reads an empty store, so the test
+   *     fails against correct code.
+   *
+   * Correct shape: seed the other tab's commit so it is VISIBLE to our read,
+   * then assert our write preserves it. A stale-snapshot implementation
+   * (read once at module/arg time, write later) drops it.
+   */
+  it("preserves a task another tab committed before our write", () => {
+    // Another tab has already committed its task.
+    saveTasks([
+      { id: "other-tab", title: "FromOtherTab", completed: false, createdAt: 1 },
+    ]);
+    // Our add must merge with what is actually persisted, not clobber it.
     addTask("Mine");
     const titles = loadTasks().map((t) => t.title);
-    expect(titles).toContain("Mine");
     expect(titles).toContain("FromOtherTab");
-    spy.mockRestore();
+    expect(titles).toContain("Mine");
+  });
+
+  it("merges rather than overwrites when the store changes mid-operation", () => {
+    // Simulate a commit landing after the caller took its snapshot: the
+    // caller hands appendTasks only ITS record, and the store already holds
+    // another tab's. A plain saveTasks([...snapshot, mine]) loses the other.
+    saveTasks([
+      { id: "a", title: "TabA", completed: false, createdAt: 1 },
+    ]);
+    const mine = { id: "b", title: "TabB", completed: false, createdAt: 2 };
+    appendTasks([mine]);
+    expect(loadTasks().map((t) => t.title).sort()).toEqual(["TabA", "TabB"]);
+  });
+
+  it("appendTasks is idempotent on a repeated id", () => {
+    const t = { id: "x", title: "Once", completed: false, createdAt: 1 };
+    appendTasks([t]);
+    appendTasks([t]);
+    expect(loadTasks()).toHaveLength(1);
   });
 
   it("re-reads at the write boundary rather than trusting a stale snapshot", () => {

@@ -75,6 +75,32 @@ export function saveTasks(tasks: Task[]): void {
   emit();
 }
 
+/**
+ * Append records with the read and the write in ONE synchronous step.
+ *
+ * A caller that reads, does work, then writes always has a window where
+ * another tab can commit; merging BEFORE the write does not close it (the
+ * window is between the merge-read and setItem). Here the current state is
+ * read immediately before setItem with nothing in between, so a concurrent
+ * commit is either already visible (and preserved) or lands after ours.
+ *
+ * localStorage has no compare-and-swap, so this narrows the window to the
+ * minimum the platform allows rather than eliminating it. Cross-tab
+ * atomicity would need the Web Locks API; that is a deliberate follow-up,
+ * not something this function claims to provide.
+ */
+export function appendTasks(incoming: Task[]): Task[] {
+  const current = loadTasks();
+  const byId = new Map(current.map((t) => [t.id, t]));
+  for (const t of incoming) {
+    if (!byId.has(t.id)) byId.set(t.id, t);
+  }
+  const merged = [...byId.values()];
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+  emit();
+  return merged;
+}
+
 export function loadFilter(): Filter {
   const raw = localStorage.getItem(FILTER_KEY);
   return raw === "active" || raw === "completed" ? raw : "all";
@@ -114,11 +140,8 @@ export function addTask(title: string): Task | null {
     completed: false,
     createdAt: Date.now(),
   };
-  // Re-read at the write boundary (not from a caller-held snapshot) and merge.
-  const current = loadTasks();
-  const merged = current.some((t) => t.id === task.id)
-    ? current
-    : [...current, task];
-  saveTasks(merged);
+  // Single synchronous read+merge+write; see appendTasks for the guarantee
+  // and its limit.
+  appendTasks([task]);
   return task;
 }
