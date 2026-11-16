@@ -504,3 +504,5 @@ h1::after {
     padding-inline: 1.05rem;
   }
 }
+
+/* MRG-2 verification: a normal change alongside rename + CRLF */
