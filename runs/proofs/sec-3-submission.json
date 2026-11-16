@@ -1,0 +1,27 @@
+{
+  "schema": 0,
+  "source": "SKEL-3 SEC-3 setup \u2014 Merlin session (owner-directed); dispatched by Randy",
+  "events": [
+    {
+      "event": "run_completed",
+      "role": "human",
+      "detail": {
+        "slice": "SEC-3",
+        "oc": "OC-14",
+        "note": "least-privilege identity pair live: agent agentmerlin8-factory-agent (5777949) installed only on factory-todo-demo; controller agentmerlin8-factory-controller (5777982) installed only on software-factory; CONTROLLER_APP_ID/CONTROLLER_PEM wired on the state repo",
+        "proofs": {
+          "agent_repo_scope": [
+            "agentmerlin8/factory-todo-demo"
+          ],
+          "agent_state_push_dryrun": "refused 403",
+          "agent_state_ref_create": "refused 403",
+          "controller_repo_scope": [
+            "agentmerlin8/software-factory"
+          ],
+          "controller_state_push_dryrun": "accepted"
+        },
+        "evidence": "this row was appended by controller-writer.yml under the controller identity (positive path)"
+      }
+    }
+  ]
+}
